@@ -8,7 +8,7 @@ API de vérification de faits (politique / débats). Python 3.12+, FastAPI, coû
 cd backend
 pip install -r requirements-dev.txt
 cp .env.example .env            # puis renseigner FACTS_LLM_API_KEY
-python -m pytest                # 247 tests, aucun appel réseau réel
+python -m pytest                # 261 tests, aucun appel réseau réel
 uvicorn app.main:app --reload --ws-max-size 16384
 ```
 
