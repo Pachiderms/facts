@@ -203,3 +203,18 @@ def test_parse_keeps_nested_braces_and_unicode():
 def test_parse_rejects_non_objects_and_garbage(text):
     with pytest.raises(LLMError):
         parse_json_object(text)
+
+
+async def test_reasoning_effort_is_sent_only_when_configured():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    llm, _ = make_llm(handler, reasoning_effort="low")
+    await llm.complete("S", "U")
+    assert seen["body"]["reasoning_effort"] == "low"
+    llm, _ = make_llm(handler)
+    await llm.complete("S", "U")
+    assert "reasoning_effort" not in seen["body"]  # défaut : paramètre absent, compatible avec tous les fournisseurs

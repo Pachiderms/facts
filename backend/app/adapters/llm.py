@@ -40,7 +40,9 @@ class OpenAICompatibleLLM:
         max_retries: int = 1,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        reasoning_effort: str = "",
     ) -> None:
+        self._reasoning_effort = reasoning_effort
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._model = model
         self._api_key = api_key
@@ -62,6 +64,10 @@ class OpenAICompatibleLLM:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if self._reasoning_effort:
+            # Modèles « raisonneurs » (ex. gpt-oss) : la réflexion consomme max_tokens ; « low » limite ce coût.
+            # Envoyé seulement si configuré : un fournisseur qui ne le connaît pas pourrait le refuser.
+            payload["reasoning_effort"] = self._reasoning_effort
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
         response = await self._post_with_retry(payload, headers)

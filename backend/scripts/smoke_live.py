@@ -65,9 +65,10 @@ async def check_llm(settings) -> bool:
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         timeout_seconds=settings.llm_timeout_seconds,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     try:
-        out = await llm.complete("Réponds uniquement par un objet JSON.", 'Renvoie {"ok": true}.', json_mode=True, max_tokens=30)
+        out = await llm.complete("Réponds uniquement par un objet JSON.", 'Renvoie {"ok": true}.', json_mode=True, max_tokens=300)
         report("LLM", True, f"réponse reçue ({len(out)} caractères)")
         return True
     except Exception as exc:

@@ -37,6 +37,7 @@ def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibl
         model=settings.llm_model,
         api_key=settings.llm_api_key,
         timeout_seconds=settings.llm_timeout_seconds,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     search = build_search_chain(settings)
     retriever = Retriever(search, max_results=settings.search_max_results)
