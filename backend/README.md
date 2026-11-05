@@ -15,6 +15,26 @@ uvicorn app.main:app --reload --ws-max-size 16384
 `--ws-max-size` est important : le défaut d'uvicorn (16 Mo) laisse un client envoyer des trames énormes.
 Documentation interactive : http://localhost:8000/docs (désactivée si `FACTS_ENV=prod`).
 
+## Test en conditions réelles (avec tes vraies clés)
+
+```bash
+cd backend
+cp .env.example .env        # renseigner FACTS_LLM_API_KEY et FACTS_TAVILY_API_KEY (.env est ignoré par git)
+python scripts/smoke_live.py
+```
+
+Étapes : Tavily (1 crédit), Wikipédia, DuckDuckGo, LLM (appel minimal), puis une vérification complète
+(jusqu'à 2 crédits Tavily). Options : `--skip-llm`, `--skip-pipeline`, `--assertion "..."`.
+Aucune clé n'est affichée. Ce script n'est pas lancé par `pytest` ni par la CI.
+
+Puis, pour tester l'API et les salons comme le fera le front :
+
+```bash
+uvicorn app.main:app --reload --ws-max-size 16384
+curl -s localhost:8000/api/v1/check -H 'Content-Type: application/json' \
+  -d '{"assertion": "Selon l\'INSEE, l\'inflation a dépassé 5 % en 2023."}'
+```
+
 ## Architecture
 
 ```
