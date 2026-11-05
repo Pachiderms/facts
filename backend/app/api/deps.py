@@ -19,3 +19,15 @@ def enforce_rate_limit(request: Request) -> None:
             detail="Trop de requêtes. Réessayez dans un instant.",
             headers={"Retry-After": str(limiter.retry_after(ip))},
         )
+
+
+def enforce_daily_check_limit(request: Request) -> None:
+    """Plafond par visiteur et par jour : protège les crédits de recherche et les quotas LLM gratuits."""
+    limiter = request.app.state.daily_check_limiter
+    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers)
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Limite quotidienne de vérifications atteinte. Revenez demain.",
+            headers={"Retry-After": str(limiter.retry_after(ip))},
+        )
