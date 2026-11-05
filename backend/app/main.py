@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters.llm import OpenAICompatibleLLM
-from app.adapters.search import DuckDuckGoSearch
+from app.adapters.search_chain import FallbackSearch, build_search_chain
 from app.api import check as check_api
 from app.api import rooms as rooms_api
 from app.core.cache import TTLCache
@@ -28,7 +28,7 @@ SECURITY_HEADERS = {
 }
 
 
-def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibleLLM]:
+def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibleLLM, FallbackSearch]:
     local = any(h in settings.llm_base_url for h in ("localhost", "127.0.0.1"))
     if not settings.llm_api_key and not local:
         raise RuntimeError("FACTS_LLM_API_KEY manquante (obligatoire pour un fournisseur LLM distant).")
@@ -38,9 +38,10 @@ def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibl
         api_key=settings.llm_api_key,
         timeout_seconds=settings.llm_timeout_seconds,
     )
-    retriever = Retriever(DuckDuckGoSearch(), max_results=settings.search_max_results)
+    search = build_search_chain(settings)
+    retriever = Retriever(search, max_results=settings.search_max_results)
     cache = TTLCache(settings.cache_ttl_seconds, settings.cache_max_entries)
-    return FactCheckService(llm, retriever, cache, settings.assertion_max_chars), llm
+    return FactCheckService(llm, retriever, cache, settings.assertion_max_chars), llm, search
 
 
 def build_rooms(settings: Settings, service: FactCheckService) -> RoomRegistry:
@@ -57,15 +58,17 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        llm = None
+        llm = search = None
         if app.state.service is None:
-            app.state.service, llm = build_service(settings)
+            app.state.service, llm, search = build_service(settings)
         if app.state.rooms is None:
             app.state.rooms = build_rooms(settings, app.state.service)
         yield
         await app.state.rooms.aclose()  # annule les vérifications en cours
         if llm is not None:
             await llm.aclose()
+        if search is not None:
+            await search.aclose()
 
     prod = settings.env == "prod"
     app = FastAPI(
@@ -84,6 +87,8 @@ def create_app(
     app.state.rooms = rooms or (build_rooms(settings, service) if service is not None else None)
     app.state.ws_connections = Counter()  # connexions WebSocket ouvertes, par IP
     app.state.ws_limiter = SlidingWindowRateLimiter(settings.ws_messages_per_minute, 60)
+    app.state.daily_check_limiter = SlidingWindowRateLimiter(settings.daily_check_limit, 86_400)
+    app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
 
     app.add_middleware(
         CORSMiddleware,
