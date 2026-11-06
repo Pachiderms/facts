@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Rate limiting (par IP)
     rate_limit_requests: int = 10
     rate_limit_window_seconds: int = 60
+    # Lectures légères (liste des salons) : compteur séparé, pour que le rafraîchissement automatique
+    # du front ne consomme pas le quota des vérifications.
+    read_rate_limit_requests: int = 60
 
     # Recherche web : chaîne de repli, dans l'ordre. Tavily est ignoré si sa clé est absente.
     search_providers: str = "tavily,wikipedia,duckduckgo"

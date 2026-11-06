@@ -56,9 +56,28 @@ def test_list_rooms():
 
 
 def test_list_rooms_is_rate_limited():
-    with make_client(rate_limit_requests=1) as c:
+    with make_client(read_rate_limit_requests=1) as c:
         assert c.get("/api/v1/rooms").status_code == 200
         assert c.get("/api/v1/rooms").status_code == 429
+
+
+def test_room_polling_does_not_consume_the_check_quota():
+    """Régression : le rafraîchissement automatique des salons épuisait le quota de /check (429)."""
+    with make_client(rate_limit_requests=2, read_rate_limit_requests=50) as c:
+        for _ in range(20):
+            assert c.get("/api/v1/rooms").status_code == 200
+        body = {"assertion": "Le chômage a baissé en France depuis 2017."}
+        assert c.post("/api/v1/check", json=body).status_code == 200
+        assert c.post("/api/v1/check", json=body).status_code == 200
+        assert c.post("/api/v1/check", json=body).status_code == 429
+
+
+def test_check_requests_do_not_consume_the_room_list_quota():
+    with make_client(rate_limit_requests=1, read_rate_limit_requests=5) as c:
+        body = {"assertion": "Le chômage a baissé en France depuis 2017."}
+        c.post("/api/v1/check", json=body)
+        assert c.post("/api/v1/check", json=body).status_code == 429
+        assert c.get("/api/v1/rooms").status_code == 200
 
 
 # ---------- Protocole fonctionnel ----------
