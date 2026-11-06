@@ -61,7 +61,7 @@ async def test_verdict_mapping(verdict, status, badge):
 
 async def test_note_and_sources_are_bounded():
     check = await FactCheckMessageChecker(FakeService(response("VRAI"))).check("12")
-    assert len(check.note) <= 200 and len(check.sources) == 3
+    assert len(check.note) <= 300 and len(check.sources) == 3
     assert set(check.sources[0]) == {"title", "url", "domain"}
 
 
@@ -75,3 +75,17 @@ def test_factories():
     assert MessageCheck.pending().status == "pending"
     assert MessageCheck.no_claim().status == "no_claim"
     assert MessageCheck.unchecked("X").badge_text == "X"
+
+
+async def test_note_is_never_cut_mid_sentence():
+    """Régression : la note était coupée net à 200 caractères (« ...l'augmentation du S »)."""
+    r = response("À NUANCER")
+    r.summary = (
+        "Le taux de pauvreté en France est de 15,4 % en 2024, mais il est stable depuis 2023 et n'a pas connu de hausse "
+        "récente marquée. Aucun élément des sources ne permet de confirmer que l'augmentation du SMIC réduirait la pauvreté. "
+        "Une troisième phrase qui dépasse largement la limite de trois cents caractères autorisée pour la note affichée sous le message."
+    )
+    check = await FactCheckMessageChecker(FakeService(r)).check("15,4 %")
+    assert check.note.endswith(".") and len(check.note) <= 300
+    assert "l'augmentation du SMIC réduirait la pauvreté." in check.note
+    assert "troisième" not in check.note

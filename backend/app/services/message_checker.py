@@ -6,7 +6,10 @@ from typing import Literal, Protocol
 from pydantic import BaseModel
 
 from app.core.security import InvalidInputError
+from app.core.text import fit_sentences
 from app.services.factcheck import FactCheckService
+
+NOTE_MAX_CHARS = 300
 
 BadgeType = Literal["green", "amber", "red", "gray"]
 
@@ -67,6 +70,6 @@ class FactCheckMessageChecker:
             status=status,  # type: ignore[arg-type]
             badge_type=badge_type,
             badge_text=badge_text,
-            note=response.summary[:200],
+            note=fit_sentences(response.summary, NOTE_MAX_CHARS),
             sources=[{"title": s.title, "url": s.url, "domain": s.domain} for s in response.verified_sources[:3]],
         )

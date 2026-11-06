@@ -68,7 +68,8 @@ class LLMAnalysis(BaseModel):
 
     verdict: Verdict
     confidence_score: int = Field(ge=0, le=100)
-    summary: str = Field(max_length=600)
+    # Marge côté modèle : le serveur raccourcit à 600 en phrases entières (voir factcheck.py).
+    summary: str = Field(max_length=2000)
     liberal_institutional_view: View
     heterodox_social_view: View
     verified_sources: list[LLMSourceRef] = Field(default_factory=list, max_length=10)
@@ -77,5 +78,6 @@ class LLMAnalysis(BaseModel):
 class CheckResponse(LLMAnalysis):
     """Réponse publique de POST /api/v1/check (sources revalidées par le serveur)."""
 
+    summary: str = Field(max_length=600)
     verified_sources: list[Source] = Field(default_factory=list, max_length=10)
     cached: bool = False
