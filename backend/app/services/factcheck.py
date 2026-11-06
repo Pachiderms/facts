@@ -20,6 +20,7 @@ from app.core.cache import TTLCache
 from app.core.domains import TIER_RESEARCH
 from app.core.schemas import CheckResponse, LLMAnalysis, Source, View
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
+from app.core.text import fit_sentences
 from app.services.prompts import (
     ANALYSIS_SYSTEM_PROMPT,
     QUERY_SYSTEM_PROMPT,
@@ -31,6 +32,7 @@ from app.services.retrieval import Retriever
 logger = logging.getLogger("facts.factcheck")
 
 MAX_QUERY_CHARS = 150
+SUMMARY_MAX_CHARS = 500  # garde de la marge sous les 600 du schéma public
 ANALYSIS_ATTEMPTS = 2
 
 # Plafonds de confiance : le LLM ne peut pas être « sûr à 95 % » sans bonnes sources.
@@ -79,7 +81,7 @@ def finalize_analysis(analysis: LLMAnalysis, results: list[SearchResult]) -> Che
     return CheckResponse(
         verdict=analysis.verdict,
         confidence_score=min(analysis.confidence_score, cap),
-        summary=analysis.summary,
+        summary=fit_sentences(analysis.summary, SUMMARY_MAX_CHARS),
         liberal_institutional_view=analysis.liberal_institutional_view,
         heterodox_social_view=analysis.heterodox_social_view,
         verified_sources=sources,

@@ -18,12 +18,13 @@ RÈGLES DE RIGUEUR (STRICTE NO-HALLUCINATION) :
 4. Pour un sujet de débat politique/économique, analyse deux perspectives complémentaires : institutionnelle/libérale d'un côté, sociale/hétérodoxe de l'autre. Chaque point doit s'appuyer sur un extrait.
 5. Dans verified_sources, ne cite que des URL copiées EXACTEMENT depuis <SEARCH_RESULTS>.
 6. Ta réponse doit être STRICTEMENT du JSON valide, sans texte ni markdown avant ou après.
+7. Chaque phrase doit être COMPLÈTE, grammaticalement correcte et terminée par un point. Ne coupe jamais une phrase : si tu manques de place, raccourcis-la ou supprime-la.
 
 SCHÉMA JSON OBLIGATOIRE :
 {
   "verdict": "VRAI" | "FAUX" | "À NUANCER" | "NON VÉRIFIABLE",
   "confidence_score": 85,
-  "summary": "Synthèse neutre et factuelle en 2 phrases maximum.",
+  "summary": "Synthèse neutre et factuelle, 2 phrases complètes, 400 caractères maximum.",
   "liberal_institutional_view": {"title": "Risques & Analyses Institutionnelles / Libérales", "points": ["Point 1", "..."]},
   "heterodox_social_view": {"title": "Leviers & Analyses Hétérodoxes / Sociales", "points": ["Point 1", "..."]},
   "verified_sources": [{"url": "URL exacte issue de SEARCH_RESULTS"}]
