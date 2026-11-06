@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     ws_max_concurrent_checks: int = 2  # protège les quotas gratuits (recherche + LLM)
     ws_max_pending_checks: int = 20
     ws_check_timeout_seconds: float = 60.0
+    ws_hello_timeout_seconds: float = 5.0  # délai pour envoyer le premier message (identité + code)
+
+    # Création de salons (mémoire bornée : tout vit en RAM sur l'offre gratuite)
+    max_rooms: int = 50
+    room_idle_ttl_seconds: int = 1_800  # un salon non permanent, vide et inactif est supprimé
+    daily_room_creation_limit: int = 3  # par visiteur et par jour
+    room_title_min_chars: int = 10
+    room_title_max_chars: int = 120
+    room_code_max_failures: int = 5  # codes faux tolérés ...
+    room_code_window_seconds: int = 600  # ... par IP sur cette fenêtre (anti-force brute)
 
     @property
     def cors_origin_list(self) -> list[str]:

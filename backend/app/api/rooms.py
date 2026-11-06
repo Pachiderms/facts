@@ -1,20 +1,23 @@
-"""Endpoints du mode débat : liste des salons (REST) et salon en direct (WebSocket).
+"""Endpoints du mode débat : salons (REST : liste, recherche, création) et salon en direct (WebSocket).
 
 Protocole WebSocket (JSON) :
-  client -> serveur : {"type": "message", "text": "..."}
+  client -> serveur : {"type": "hello", "token": "...", "code": "..."}   (PREMIER message, obligatoire)
+                      {"type": "message", "text": "..."}
   serveur -> client : snapshot | presence | message | check_result | error
 """
 
+import asyncio
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request, WebSocket
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from app.api.deps import enforce_read_rate_limit
+from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
 from app.core.config import Settings
-from app.core.security import InvalidInputError, get_client_ip
-from app.services.rooms import NotAllowedError, RoomFullError
+from app.core.identity import is_valid_token, participant_id
+from app.core.security import InvalidInputError, get_client_ip, looks_like_prompt_injection, sanitize_text
+from app.services.rooms import THEMES, NotAllowedError, RoomFullError, TooManyRoomsError
 
 router = APIRouter(prefix="/api/v1", tags=["rooms"])
 
@@ -24,6 +27,8 @@ MAX_STRIKES = 10  # erreurs / dépassements tolérés avant déconnexion
 WS_POLICY_VIOLATION = 1008
 WS_MESSAGE_TOO_BIG = 1009
 WS_TRY_AGAIN_LATER = 1013
+WS_REPLACED = 4000  # même identité connectée ailleurs : cette connexion cède sa place
+HELLO_MAX_CHARS = 400
 
 
 class RoomSummary(BaseModel):
@@ -31,6 +36,7 @@ class RoomSummary(BaseModel):
     title: str
     category: str
     theme_category: str
+    visibility: Literal["public", "private"]
     trust_score: int | None
     message_count: int
     participants: int
@@ -43,9 +49,106 @@ class ClientEvent(BaseModel):
     text: str = Field(max_length=2000)
 
 
+class HelloEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["hello"]
+    token: str
+    code: str | None = Field(default=None, max_length=16)
+
+    @field_validator("token")
+    @classmethod
+    def _token_format(cls, v: str) -> str:
+        if not is_valid_token(v):
+            raise ValueError("jeton invalide")
+        return v
+
+
+class CreateRoomRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(max_length=400)  # borne large : la vraie limite (120) est appliquée après nettoyage
+    theme_category: str
+    visibility: Literal["public", "private"] = "public"
+    participant_token: str
+
+    @field_validator("participant_token")
+    @classmethod
+    def _token_format(cls, v: str) -> str:
+        if not is_valid_token(v):
+            raise ValueError("jeton invalide")
+        return v
+
+    @field_validator("theme_category")
+    @classmethod
+    def _theme_known(cls, v: str) -> str:
+        if v not in THEMES:
+            raise ValueError("thème inconnu")
+        return v
+
+
+class CreatedRoom(BaseModel):
+    id: str
+    visibility: Literal["public", "private"]
+    access_code: str | None = None  # affiché une seule fois ; le propriétaire le retrouve dans son salon
+
+
+class RoomLookup(BaseModel):
+    """Résultat d'une recherche par ID. Un salon privé ne révèle ni titre ni contenu."""
+
+    id: str
+    visibility: Literal["public", "private"]
+    requires_code: bool
+    room: RoomSummary | None = None
+
+
 @router.get("/rooms", response_model=list[RoomSummary], dependencies=[Depends(enforce_read_rate_limit)])
-async def list_rooms(request: Request):
-    return request.app.state.rooms.summaries()
+async def list_rooms(request: Request, q: str | None = Query(default=None, max_length=60)):
+    registry = request.app.state.rooms
+    await registry.purge_idle()
+    return registry.summaries(q)
+
+
+@router.get("/rooms/{room_id}", response_model=RoomLookup, dependencies=[Depends(enforce_read_rate_limit)])
+async def lookup_room(request: Request, room_id: str):
+    room = request.app.state.rooms.get(room_id) if ROOM_ID_RE.fullmatch(room_id) else None
+    if room is None:
+        raise HTTPException(status_code=404, detail="Salon introuvable.")
+    if room.requires_code():
+        return RoomLookup(id=room.id, visibility="private", requires_code=True)
+    return RoomLookup(id=room.id, visibility="public", requires_code=False, room=room.summary())
+
+
+@router.post("/rooms", response_model=CreatedRoom, status_code=201, dependencies=[Depends(enforce_rate_limit)])
+async def create_room(request: Request, body: CreateRoomRequest):
+    app = request.app
+    settings: Settings = app.state.settings
+    try:
+        title = sanitize_text(body.title, settings.room_title_max_chars)
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if len(title) < settings.room_title_min_chars:
+        raise HTTPException(status_code=422, detail=f"Titre trop court (min {settings.room_title_min_chars} caractères).")
+    if looks_like_prompt_injection(title):
+        raise HTTPException(status_code=422, detail="Titre refusé.")
+
+    # Après la validation : une requête invalide ne consomme pas le quota quotidien.
+    ip = get_client_ip(request, settings.trust_proxy_headers)
+    limiter = app.state.daily_room_limiter
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Limite quotidienne de création de salons atteinte. Revenez demain.",
+            headers={"Retry-After": str(limiter.retry_after(ip))},
+        )
+    try:
+        room = await app.state.rooms.create(
+            title=title,
+            theme_category=body.theme_category,
+            visibility=body.visibility,
+            owner_id=participant_id(body.participant_token),
+        )
+    except TooManyRoomsError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return CreatedRoom(id=room.id, visibility=room.visibility, access_code=room.access_code)
 
 
 def _origin_allowed(ws: WebSocket, settings: Settings) -> bool:
@@ -83,12 +186,29 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
     client = None
     try:
         await ws.accept()
+        hello = await _read_hello(ws, settings)
+        if hello is None:
+            return
+        pid = participant_id(hello.token)
+
+        if room.requires_code() and not room.is_owner(pid):
+            code_limiter = app.state.code_limiter
+            if code_limiter.retry_after(ip) > 0:  # on vérifie AVANT de tester le code : pas d'oracle une fois bloqué
+                await _reject(ws, "too_many_attempts", "Trop de codes erronés. Réessayez plus tard.")
+                return
+            if not room.check_code(hello.code):
+                code_limiter.allow(ip)  # seuls les échecs consomment le quota
+                await _reject(ws, "invalid_code", "Code d'accès invalide.")
+                return
+
         try:
-            client = room.join(ws.send_json)
+            client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED))
         except RoomFullError:
             await ws.close(code=WS_TRY_AGAIN_LATER)
             return
-        await ws.send_json(room.snapshot(client.role))
+        if replaced is not None:
+            await _evict_replaced(replaced)
+        await ws.send_json(room.snapshot(client.role, pid))
         await room.broadcast_presence()
         await _receive_loop(ws, room, client, ip, settings)
     except RuntimeError:
@@ -99,6 +219,41 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             del connections[ip]
         if client is not None:
             await room.leave(client.id)
+
+
+async def _reject(ws: WebSocket, code: str, detail: str) -> None:
+    await _error(ws, code, detail)
+    await ws.close(code=WS_POLICY_VIOLATION)
+
+
+async def _read_hello(ws: WebSocket, settings: Settings) -> HelloEvent | None:
+    """Premier message obligatoire : identité (jeton) et, pour un salon privé, le code d'accès."""
+    try:
+        incoming = await asyncio.wait_for(ws.receive(), settings.ws_hello_timeout_seconds)
+    except asyncio.TimeoutError:
+        await ws.close(code=WS_POLICY_VIOLATION)
+        return None
+    raw = incoming.get("text")
+    if incoming["type"] == "websocket.disconnect":
+        return None
+    if raw is None or len(raw) > HELLO_MAX_CHARS:
+        await ws.close(code=WS_POLICY_VIOLATION)
+        return None
+    try:
+        return HelloEvent.model_validate_json(raw)
+    except ValidationError:
+        await _reject(ws, "invalid_hello", "Identification invalide.")
+        return None
+
+
+async def _evict_replaced(old) -> None:
+    """L'ancienne connexion de la même identité cède sa place (reconnexion ou second onglet)."""
+    try:
+        await old.send({"type": "error", "code": "session_replaced", "detail": "Ouvert depuis un autre onglet."})
+        if old.close is not None:
+            await old.close()
+    except Exception:
+        pass  # déjà morte : rien à faire
 
 
 async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings) -> None:

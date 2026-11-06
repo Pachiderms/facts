@@ -51,7 +51,7 @@ def joined(room, n=1):
     clients = []
     for _ in range(n):
         rec = Recorder()
-        clients.append((room.join(rec.send), rec))
+        clients.append((room.join(rec.send)[0], rec))
     return clients
 
 
