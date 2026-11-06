@@ -21,6 +21,18 @@ def enforce_rate_limit(request: Request) -> None:
         )
 
 
+def enforce_read_rate_limit(request: Request) -> None:
+    """Lectures sans coût (liste des salons) : plafond plus large, compteur indépendant de /check."""
+    limiter = request.app.state.read_limiter
+    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers)
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Trop de requêtes. Réessayez dans un instant.",
+            headers={"Retry-After": str(limiter.retry_after(ip))},
+        )
+
+
 def enforce_daily_check_limit(request: Request) -> None:
     """Plafond par visiteur et par jour : protège les crédits de recherche et les quotas LLM gratuits."""
     limiter = request.app.state.daily_check_limiter

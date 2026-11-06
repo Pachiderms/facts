@@ -11,7 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.api.deps import enforce_rate_limit
+from app.api.deps import enforce_read_rate_limit
 from app.core.config import Settings
 from app.core.security import InvalidInputError, get_client_ip
 from app.services.rooms import NotAllowedError, RoomFullError
@@ -43,7 +43,7 @@ class ClientEvent(BaseModel):
     text: str = Field(max_length=2000)
 
 
-@router.get("/rooms", response_model=list[RoomSummary], dependencies=[Depends(enforce_rate_limit)])
+@router.get("/rooms", response_model=list[RoomSummary], dependencies=[Depends(enforce_read_rate_limit)])
 async def list_rooms(request: Request):
     return request.app.state.rooms.summaries()
 

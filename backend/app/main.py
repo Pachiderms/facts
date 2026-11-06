@@ -85,6 +85,9 @@ def create_app(
     app.state.limiter = limiter or SlidingWindowRateLimiter(
         settings.rate_limit_requests, settings.rate_limit_window_seconds
     )
+    app.state.read_limiter = SlidingWindowRateLimiter(
+        settings.read_rate_limit_requests, settings.rate_limit_window_seconds
+    )
     app.state.rooms = rooms or (build_rooms(settings, service) if service is not None else None)
     app.state.ws_connections = Counter()  # connexions WebSocket ouvertes, par IP
     app.state.ws_limiter = SlidingWindowRateLimiter(settings.ws_messages_per_minute, 60)
