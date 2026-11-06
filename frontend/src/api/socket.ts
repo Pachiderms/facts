@@ -1,0 +1,97 @@
+import { wsBase } from './client'
+import type { ServerEvent } from './types'
+
+export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
+
+/** 1008 : salon inconnu ou origine refusée. Réessayer ne changerait rien. */
+const NO_RETRY_CODES = new Set([1000, 1008, 1009])
+const BASE_DELAY_MS = 1_000
+const MAX_DELAY_MS = 30_000
+/** 1013 : « réessayez plus tard » (salon ou IP saturés) : on temporise davantage. */
+const BUSY_MIN_DELAY_MS = 10_000
+
+const EVENT_TYPES = new Set(['snapshot', 'presence', 'message', 'check_result', 'error'])
+
+/** Décode un événement serveur ; retourne `null` si la trame est invalide (ignorée). */
+export function parseServerEvent(raw: unknown): ServerEvent | null {
+  if (typeof raw !== 'string') return null
+  try {
+    const data: unknown = JSON.parse(raw)
+    if (typeof data === 'object' && data !== null && EVENT_TYPES.has((data as { type?: string }).type ?? '')) {
+      return data as ServerEvent
+    }
+  } catch {
+    /* JSON invalide */
+  }
+  return null
+}
+
+export function reconnectDelay(attempt: number, closeCode: number | null, random: () => number = Math.random): number {
+  const exponential = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** attempt)
+  const jitter = exponential * 0.25 * random() // évite que tous les clients se reconnectent ensemble
+  const delay = exponential + jitter
+  return closeCode === 1013 ? Math.max(delay, BUSY_MIN_DELAY_MS) : delay
+}
+
+interface Handlers {
+  onEvent: (event: ServerEvent) => void
+  onStatus: (status: SocketStatus) => void
+}
+
+/** Connexion WebSocket d'un salon, avec reconnexion automatique (backoff exponentiel + jitter). */
+export class RoomSocket {
+  private ws: WebSocket | null = null
+  private attempt = 0
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private stopped = false
+
+  constructor(
+    private readonly roomId: string,
+    private readonly handlers: Handlers,
+  ) {}
+
+  connect(): void {
+    this.stopped = false
+    this.open()
+  }
+
+  private open(): void {
+    this.handlers.onStatus(this.attempt === 0 ? 'connecting' : 'reconnecting')
+    const ws = new WebSocket(`${wsBase()}/api/v1/rooms/${encodeURIComponent(this.roomId)}/ws`)
+    this.ws = ws
+    ws.onopen = () => {
+      this.attempt = 0
+      this.handlers.onStatus('open')
+    }
+    ws.onmessage = (e: MessageEvent) => {
+      const event = parseServerEvent(e.data)
+      if (event) this.handlers.onEvent(event)
+    }
+    ws.onclose = (e: CloseEvent) => {
+      if (this.ws !== ws) return
+      this.ws = null
+      if (this.stopped || NO_RETRY_CODES.has(e.code)) {
+        this.handlers.onStatus('closed')
+        return
+      }
+      this.handlers.onStatus('reconnecting')
+      this.timer = setTimeout(() => this.open(), reconnectDelay(this.attempt++, e.code))
+    }
+  }
+
+  /** Envoie un message ; retourne `false` si la connexion n'est pas ouverte. */
+  send(text: string): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify({ type: 'message', text }))
+    return true
+  }
+
+  close(): void {
+    this.stopped = true
+    if (this.timer) clearTimeout(this.timer)
+    const ws = this.ws
+    this.ws = null
+    ws?.close(1000)
+    this.handlers.onStatus('closed')
+  }
+}
