@@ -130,7 +130,7 @@ class FactCheckService:
         fallback = [assertion[:MAX_QUERY_CHARS]]
         try:
             raw = await self._llm.complete(
-                QUERY_SYSTEM_PROMPT, build_query_user_prompt(assertion), json_mode=True, max_tokens=200
+                QUERY_SYSTEM_PROMPT, build_query_user_prompt(assertion), json_mode=True, max_tokens=500
             )
             candidates = parse_json_object(raw).get("queries")
         except LLMRateLimitError:
@@ -155,7 +155,7 @@ class FactCheckService:
         """Étape 3. Une nouvelle tentative si le JSON est invalide ; les erreurs réseau/quota remontent."""
         user_prompt = build_analysis_user_prompt(assertion, results)
         for attempt in range(1, ANALYSIS_ATTEMPTS + 1):
-            raw = await self._llm.complete(ANALYSIS_SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=1500)
+            raw = await self._llm.complete(ANALYSIS_SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=2500)
             try:
                 return LLMAnalysis.model_validate(parse_json_object(raw))
             except (LLMError, ValidationError) as exc:

@@ -28,15 +28,30 @@ class Settings(BaseSettings):
     rate_limit_requests: int = 10
     rate_limit_window_seconds: int = 60
 
-    # Recherche web + cache
+    # Recherche web : chaîne de repli, dans l'ordre. Tavily est ignoré si sa clé est absente.
+    search_providers: str = "tavily,wikipedia,duckduckgo"
     search_max_results: int = 5
-    cache_ttl_seconds: int = 3600
+    search_timeout_seconds: float = 8.0
+    search_breaker_failures: int = 3  # échecs consécutifs avant d'ignorer un fournisseur
+    search_breaker_cooldown_seconds: float = 120.0
+    tavily_api_key: str = ""
+    # Offre gratuite : 1 000 crédits/mois ; marge car une vérification lance jusqu'à 2 recherches.
+    tavily_monthly_limit: int = 900
+    wikipedia_lang: str = "fr"
+
+    # Cache des vérifications (24 h : une même assertion ne coûte qu'une recherche par jour)
+    cache_ttl_seconds: int = 86_400
     cache_max_entries: int = 500
+
+    # Plafonds par visiteur et par jour (protègent les crédits de recherche et les quotas LLM)
+    daily_check_limit: int = 30
+    daily_ws_message_limit: int = 200
 
     # LLM (API compatible OpenAI)
     llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile est retiré chez Groq depuis le 16/08/2026
+    llm_reasoning_effort: str = ""  # "low" recommandé avec les modèles gpt-oss ; vide = non envoyé
     llm_timeout_seconds: float = 30.0
 
     # Débats en direct (WebSocket)

@@ -121,6 +121,8 @@ async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings
             problem = ("unsupported", "Les messages binaires ne sont pas acceptés.")
         elif not limiter.allow(ip):
             problem = ("rate_limited", "Trop de messages, ralentissez.")
+        elif not ws.app.state.daily_ws_limiter.allow(ip):
+            problem = ("daily_limit", "Limite quotidienne de messages atteinte. Revenez demain.")
         else:
             try:
                 event = ClientEvent.model_validate_json(raw)

@@ -8,19 +8,39 @@ API de vérification de faits (politique / débats). Python 3.12+, FastAPI, coû
 cd backend
 pip install -r requirements-dev.txt
 cp .env.example .env            # puis renseigner FACTS_LLM_API_KEY
-python -m pytest                # 261 tests, aucun appel réseau réel
+python -m pytest                # 353 tests, aucun appel réseau réel
 uvicorn app.main:app --reload --ws-max-size 16384
 ```
 
 `--ws-max-size` est important : le défaut d'uvicorn (16 Mo) laisse un client envoyer des trames énormes.
 Documentation interactive : http://localhost:8000/docs (désactivée si `FACTS_ENV=prod`).
 
+## Test en conditions réelles (avec tes vraies clés)
+
+```bash
+cd backend
+cp .env.example .env        # renseigner FACTS_LLM_API_KEY et FACTS_TAVILY_API_KEY (.env est ignoré par git)
+python scripts/smoke_live.py
+```
+
+Étapes : Tavily (1 crédit), Wikipédia, DuckDuckGo, LLM (appel minimal), puis une vérification complète
+(jusqu'à 2 crédits Tavily). Options : `--skip-llm`, `--skip-pipeline`, `--assertion "..."`.
+Aucune clé n'est affichée. Ce script n'est pas lancé par `pytest` ni par la CI.
+
+Puis, pour tester l'API et les salons comme le fera le front :
+
+```bash
+uvicorn app.main:app --reload --ws-max-size 16384
+curl -s localhost:8000/api/v1/check -H 'Content-Type: application/json' \
+  -d '{"assertion": "Selon l\'INSEE, l\'inflation a dépassé 5 % en 2023."}'
+```
+
 ## Architecture
 
 ```
 app/
   core/       config, schémas Pydantic, sécurité, cache, scores de domaines   (aucune dépendance externe)
-  adapters/   search.py (DuckDuckGo), llm.py (API compatible OpenAI)          (le monde extérieur)
+  adapters/   search.py (Tavily, Wikipédia, DuckDuckGo), search_chain.py (repli), llm.py   (le monde extérieur)
   services/   factcheck, retrieval, trust, rooms, message_checker, prompts    (la logique métier)
   api/        check.py (REST), rooms.py (REST + WebSocket), deps.py           (HTTP / WS)
   main.py     câblage (create_app)
@@ -47,10 +67,27 @@ Règle de dépendance : `api -> services -> adapters/core`. Recherche et LLM son
 ## Pipeline du chatbot
 
 1. SLM : 1-2 requêtes de recherche (repli sur l'assertion si le SLM échoue).
-2. Code : recherche DuckDuckGo, dédoublonnage, classement par confiance du domaine.
+2. Code : recherche via la chaîne de repli (voir ci-dessous), dédoublonnage, classement par confiance du domaine.
 3. SLM : analyse en JSON, puis **validation en code** (`finalize_analysis`) :
    URL absente de la recherche -> supprimée ; titre / domaine / score de confiance recalculés par le serveur ;
    aucune source valide -> « NON VÉRIFIABLE », points vidés, confiance plafonnée (30 sans source, 70 avec des sources faibles).
+
+## Recherche web : chaîne de repli
+
+Ordre par défaut (`FACTS_SEARCH_PROVIDERS=tavily,wikipedia,duckduckgo`) : le premier fournisseur disponible
+qui trouve des résultats répond ; les suivants ne sont pas sollicités.
+
+| Fournisseur | Coût | Protection |
+|---|---|---|
+| Tavily | 1 000 crédits/mois gratuits, 1 crédit par recherche « basic » | quota mensuel (`FACTS_TAVILY_MONTHLY_LIMIT`, 900 par défaut), ignoré sans `FACTS_TAVILY_API_KEY` |
+| Wikipédia | gratuit, sans clé | contexte seulement : score de confiance 40, jamais devant une source institutionnelle |
+| DuckDuckGo (`ddgs`) | gratuit, scraping non officiel | dernier recours, souvent bridé depuis un serveur cloud |
+
+- **Disjoncteur** par fournisseur : après 3 échecs consécutifs, il est ignoré 120 s, puis un seul essai est autorisé.
+- **Quota mensuel** : compté à la tentative (un appel échoué a pu coûter un crédit). Épuisé, on bascule sur le suivant sans appeler.
+- **Cache 24 h** et **plafonds par visiteur** (30 vérifications/jour, 200 messages de salon/jour) pour ménager les crédits.
+  Une vérification lance jusqu'à 2 recherches : avec 900 crédits, comptez 450 vérifications par mois au pire, davantage grâce au cache.
+- Si aucun fournisseur ne peut répondre, l'API renvoie 502 : jamais de verdict sans sources.
 
 ## Trust meter
 
@@ -69,7 +106,12 @@ participants anonymes, rôles A/B attribués par le serveur.
 
 ## Limites connues
 
-- Recherche DuckDuckGo (`ddgs`) : scraping non officiel, peut être limité en débit. Non testée en conditions réelles dans l'environnement de développement (réseau restreint) : à valider en local.
+- Adaptateurs Tavily et Wikipédia **non testés contre les vrais services** (réseau restreint pendant le développement) :
+  les tests utilisent un transport factice. Points à valider avec une vraie clé : format d'authentification Tavily
+  (la clé est envoyée en en-tête Bearer ET dans le corps, car la documentation consultée était ancienne),
+  forme de la réponse Wikipédia, et limites de débit actuelles de chaque service.
+- Recherche DuckDuckGo (`ddgs`) : scraping non officiel, peut être limité en débit, surtout depuis une IP de datacenter.
+- Le plafond quotidien compte aussi les réponses servies par le cache (suivi par IP, en mémoire : repart à zéro au redémarrage).
 - Quotas gratuits des fournisseurs LLM : à vérifier avant mise en ligne ; ils changent.
 - État en mémoire : un redémarrage efface historique, cache et compteurs ; une seule instance.
 - Heuristiques à ajuster avec de vrais usages : scores de domaines, poids du trust meter, filtre « message vérifiable » (présence d'un chiffre ou d'une source).

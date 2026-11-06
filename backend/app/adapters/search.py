@@ -6,15 +6,23 @@ et on change une ligne de câblage ; aucun autre fichier ne bouge.
 """
 
 import asyncio
+import html
+import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import quote
+
+import httpx
 
 from app.core.domains import domain_trust_score, extract_domain
 from app.core.security import InvalidInputError, sanitize_text
 
 MAX_TITLE_CHARS = 200
 MAX_SNIPPET_CHARS = 600
+
+logger = logging.getLogger("facts.search")
 
 
 class SearchError(RuntimeError):
@@ -51,7 +59,7 @@ def normalize_result(raw: dict[str, Any]) -> SearchResult | None:
         # un extrait trop long est raccourci, pas écarté.
         title = sanitize_text(str(raw.get("title") or "")[: MAX_TITLE_CHARS * 2], MAX_TITLE_CHARS * 2)
         snippet = sanitize_text(
-            str(raw.get("body") or raw.get("snippet") or "")[: MAX_SNIPPET_CHARS * 2], MAX_SNIPPET_CHARS * 2
+            str(raw.get("body") or raw.get("snippet") or raw.get("content") or "")[: MAX_SNIPPET_CHARS * 2], MAX_SNIPPET_CHARS * 2
         )
     except InvalidInputError:
         return None  # titre ou extrait vide après nettoyage : on l'écarte
@@ -96,4 +104,130 @@ class DuckDuckGoSearch:
             raise SearchError(f"Recherche web indisponible : {type(exc).__name__}") from exc
 
         results = [r for r in (normalize_result(item) for item in raw or []) if r is not None]
+        return results[:max_results]
+
+
+MAX_QUERY_CHARS = 300
+_LANG_RE = re.compile(r"[a-z]{2,3}")
+USER_AGENT = "FactsApp/0.1 (+https://github.com/pachiderms/facts)"
+
+
+class _HttpSearchBase:
+    """Socle commun aux adaptateurs HTTP : client partagé, erreurs génériques, fermeture propre.
+
+    Les messages d'erreur ne contiennent jamais d'URL complète, d'en-tête ni de corps de réponse :
+    ni la clé API ni du contenu hostile ne doivent fuiter dans les journaux ou vers le client.
+    """
+
+    name = "http"
+
+    def __init__(self, timeout_seconds: float, client: httpx.AsyncClient | None) -> None:
+        self._client = client or httpx.AsyncClient(timeout=timeout_seconds, headers={"User-Agent": USER_AGENT})
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
+    async def _request(self, method: str, url: str, **kwargs: Any) -> Any:
+        try:
+            response = await self._client.request(method, url, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise SearchError(f"{self.name} : délai dépassé.") from exc
+        except httpx.HTTPError as exc:
+            raise SearchError(f"{self.name} indisponible : {type(exc).__name__}") from exc
+        if response.status_code in (401, 403):
+            logger.error("%s : accès refusé (HTTP %s), vérifier la clé API", self.name, response.status_code)
+            raise SearchError(f"{self.name} : accès refusé.")
+        if response.status_code == 429:
+            raise SearchError(f"{self.name} : limite de débit atteinte.")
+        if response.status_code >= 400:
+            raise SearchError(f"{self.name} : erreur HTTP {response.status_code}.")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise SearchError(f"{self.name} : réponse illisible.") from exc
+
+
+class TavilySearch(_HttpSearchBase):
+    """API de recherche Tavily (offre gratuite : crédits mensuels, 1 crédit par recherche « basic »).
+
+    Seule la recherche « basic » est utilisée (1 crédit) ; « advanced » en coûte 2.
+    La réponse générée par Tavily (`answer`) est volontairement désactivée : on ne veut que
+    des sources, la synthèse reste celle de NOTRE pipeline, dont la sortie est validée.
+    NB : la clé est envoyée en en-tête Bearer ET dans le corps, car la documentation consultée
+    (ancienne) cite le corps et les versions récentes l'en-tête. À valider avec une vraie clé.
+    """
+
+    name = "tavily"
+    URL = "https://api.tavily.com/search"
+
+    def __init__(
+        self, api_key: str, timeout_seconds: float = 8.0, client: httpx.AsyncClient | None = None
+    ) -> None:
+        if not api_key:
+            raise ValueError("Clé API Tavily manquante.")
+        super().__init__(timeout_seconds, client)
+        self._api_key = api_key
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        body = {
+            "api_key": self._api_key,
+            "query": query[:MAX_QUERY_CHARS],
+            "search_depth": "basic",
+            "max_results": max_results,
+            "include_answer": False,
+        }
+        data = await self._request(
+            "POST", self.URL, json=body, headers={"Authorization": f"Bearer {self._api_key}"}
+        )
+        items = data.get("results") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            raise SearchError("tavily : réponse inattendue.")
+        results = [r for r in (normalize_result(i) for i in items if isinstance(i, dict)) if r is not None]
+        return results[:max_results]
+
+
+class WikipediaSearch(_HttpSearchBase):
+    """Recherche plein texte Wikipédia (gratuite, sans clé). Source de contexte, pas de preuve :
+    son score de confiance reste celui d'un domaine « autre » (40), donc elle ne passe jamais
+    devant une source institutionnelle dans le classement."""
+
+    name = "wikipedia"
+
+    def __init__(
+        self, lang: str = "fr", timeout_seconds: float = 8.0, client: httpx.AsyncClient | None = None
+    ) -> None:
+        if not _LANG_RE.fullmatch(lang):  # la langue entre dans le nom d'hôte : on la valide
+            raise ValueError("Code de langue Wikipédia invalide.")
+        super().__init__(timeout_seconds, client)
+        self._lang = lang
+
+    async def search(self, query: str, max_results: int) -> list[SearchResult]:
+        params = {
+            "action": "query",
+            "list": "search",
+            "srsearch": query[:MAX_QUERY_CHARS],
+            "srlimit": max(1, min(max_results, 10)),
+            "srnamespace": 0,
+            "format": "json",
+            "utf8": 1,
+        }
+        data = await self._request("GET", f"https://{self._lang}.wikipedia.org/w/api.php", params=params)
+        try:
+            items = data["query"]["search"]
+        except (KeyError, TypeError) as exc:
+            raise SearchError("wikipedia : réponse inattendue.") from exc
+        if not isinstance(items, list):
+            raise SearchError("wikipedia : réponse inattendue.")
+
+        results: list[SearchResult] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("title"):
+                continue
+            title = html.unescape(str(item["title"]))
+            url = f"https://{self._lang}.wikipedia.org/wiki/{quote(title.replace(' ', '_'), safe='_()')}"
+            # Le snippet contient du HTML (<span class="searchmatch">) : retiré par sanitize_text.
+            snippet = html.unescape(str(item.get("snippet") or ""))
+            normalized = normalize_result({"url": url, "title": title, "snippet": snippet})
+            if normalized is not None:
+                results.append(normalized)
         return results[:max_results]
