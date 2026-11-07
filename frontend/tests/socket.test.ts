@@ -103,7 +103,45 @@ describe('RoomSocket', () => {
     expect(socket.send('trop tôt')).toBe(false)
     current().open()
     expect(socket.send('Selon l’INSEE…')).toBe(true)
-    expect(JSON.parse(current().sent[0]!)).toEqual({ type: 'message', text: 'Selon l’INSEE…' })
+    expect(JSON.parse(current().sent[1]!)).toEqual({ type: 'message', text: 'Selon l’INSEE…' }) // sent[0] = hello
+  })
+
+  describe('identification (premier message obligatoire)', () => {
+    const TOKEN = 'abcdefghijklmnopqrstuvwxyz012345'
+
+    it('envoie « hello » avec le jeton dès l’ouverture, avant tout autre message', () => {
+      new RoomSocket('room-1', { onEvent: () => undefined, onStatus: () => undefined }, { token: TOKEN }).connect()
+      expect(current().sent).toEqual([])
+      current().open()
+      expect(JSON.parse(current().sent[0]!)).toEqual({ type: 'hello', token: TOKEN })
+    })
+
+    it('ajoute le code d’accès d’un salon privé, et seulement s’il existe', () => {
+      new RoomSocket('room-1', { onEvent: () => undefined, onStatus: () => undefined }, { token: TOKEN, code: 'k7m2xq' }).connect()
+      current().open()
+      expect(JSON.parse(current().sent[0]!)).toEqual({ type: 'hello', token: TOKEN, code: 'k7m2xq' })
+    })
+
+    it('sans jeton fourni, utilise l’identité du navigateur (stable d’une connexion à l’autre)', () => {
+      localStorage.clear()
+      socket.connect()
+      current().open()
+      const first = JSON.parse(current().sent[0]!).token as string
+      expect(first).toMatch(/^[A-Za-z0-9_-]{22,64}$/)
+      current().drop(1006)
+      vi.advanceTimersByTime(1_000)
+      current().open()
+      expect(JSON.parse(current().sent[0]!).token).toBe(first)
+    })
+
+    it('se ré-identifie après chaque reconnexion', () => {
+      socket.connect()
+      current().open()
+      current().drop(1006)
+      vi.advanceTimersByTime(1_000)
+      current().open()
+      expect(JSON.parse(current().sent[0]!).type).toBe('hello')
+    })
   })
 
   it('se reconnecte après une coupure, avec délai croissant', () => {
@@ -131,7 +169,7 @@ describe('RoomSocket', () => {
     expect(FakeWebSocket.instances).toHaveLength(3)
   })
 
-  it.each([1008, 1009, 1000])('ne se reconnecte pas après le code %i', (code) => {
+  it.each([1008, 1009, 1000, 4000])('ne se reconnecte pas après le code %i', (code) => {
     socket.connect()
     current().drop(code)
     vi.advanceTimersByTime(60_000)

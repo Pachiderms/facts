@@ -1,8 +1,11 @@
-import { X } from 'lucide-react'
+import { ArrowLeft, Lock, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { SocketStatus } from '../../api/socket'
 import type { RoomSummary } from '../../api/types'
 import { useRoom } from '../../hooks/useRoom'
+import { forgetCode } from '../../lib/identity'
+import { CopyChip } from '../CopyChip'
+import { AccessCodeForm } from './AccessCodeForm'
 import { Composer } from './Composer'
 import { MessageCard } from './MessageCard'
 import { TrustMeter } from './TrustMeter'
@@ -14,9 +17,19 @@ const STATUS_LABEL: Record<SocketStatus, { text: string; dot: string }> = {
   closed: { text: 'Déconnecté', dot: 'bg-neutral-400' },
 }
 
-/** Un salon. Monté avec `key={roomId}` : changer de salon ferme proprement l'ancienne connexion. */
-export function RoomView({ roomId, fallback }: { roomId: string; fallback: RoomSummary | undefined }) {
-  const { status, role, room, messages, presence, trustScore, deltas, notice, send, dismissNotice } = useRoom(roomId)
+interface Props {
+  roomId: string
+  fallback: RoomSummary | undefined
+  /** Code d'accès (salon privé) déjà saisi ou mémorisé. */
+  code?: string
+  onSubmitCode: (code: string) => void
+  /** Reprendre la place dans CET onglet (après ouverture dans un autre). */
+  onRetake: () => void
+}
+
+/** Un salon. Monté avec une `key` : changer de salon ou de code ferme proprement l'ancienne connexion. */
+export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Props) {
+  const { status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice } = useRoom(roomId, code)
   const info = room ?? fallback
   const listRef = useRef<HTMLUListElement>(null)
   const stickToBottom = useRef(true)
@@ -31,15 +44,59 @@ export function RoomView({ roomId, fallback }: { roomId: string; fallback: RoomS
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [messages])
 
+  // Un code refusé ne doit pas être resservi au prochain rechargement.
+  useEffect(() => {
+    if (denied === 'invalid_code') forgetCode(roomId)
+  }, [denied, roomId])
+
+  if (denied === 'invalid_code') return <AccessCodeForm wrong={Boolean(code)} onSubmit={onSubmitCode} />
+  if (denied === 'too_many_attempts') {
+    return (
+      <p role="alert" className="mx-auto max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center text-sm text-amber-900">
+        Trop de codes erronés depuis votre connexion. Réessayez dans quelques minutes.
+      </p>
+    )
+  }
+  if (denied === 'session_replaced') {
+    return (
+      <div role="alert" className="mx-auto max-w-md space-y-3 rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-700 shadow-sm">
+        <p>Ce salon est ouvert dans un autre onglet : vous y avez été déconnecté.</p>
+        <button
+          type="button"
+          onClick={onRetake}
+          className="rounded-xl bg-neutral-900 px-5 py-2 text-xs font-bold text-white shadow hover:bg-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+        >
+          Reprendre ici
+        </button>
+      </div>
+    )
+  }
+
   const live = STATUS_LABEL[status]
 
   return (
     <div className="space-y-6">
+      <a
+        href="#/arena"
+        className="inline-flex items-center gap-1.5 rounded text-xs font-bold text-neutral-600 hover:text-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" /> Tous les salons
+      </a>
+
       <section className="space-y-5 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col justify-between gap-3 border-b border-neutral-200 pb-4 md:flex-row md:items-center">
           <div className="min-w-0">
             <span className="font-mono text-xs font-bold uppercase tracking-wider text-neutral-500">{info?.category ?? '…'}</span>
             <h2 className="mt-0.5 text-lg font-extrabold text-neutral-900">{info?.title ?? 'Chargement du salon…'}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {info?.visibility === 'private' && (
+                <span className="inline-flex items-center gap-1 rounded-lg border border-neutral-200 bg-neutral-100 px-2 py-1 text-[11px] font-bold text-neutral-700">
+                  <Lock className="h-3 w-3" aria-hidden="true" /> Salon privé
+                </span>
+              )}
+              <CopyChip label="ID" value={roomId} />
+              {info?.access_code && <CopyChip label="Code d’accès" value={info.access_code} />}
+            </div>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-1.5 md:items-end">
             <span role="status" className="inline-flex items-center rounded-full border border-neutral-200 bg-neutral-100 px-3 py-1 text-xs font-semibold text-neutral-800">

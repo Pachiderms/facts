@@ -49,7 +49,7 @@ THEMES: dict[str, str] = {  # theme_category -> libellé par défaut de la caté
     "social": "Économie & Emploi",
     "souverain": "Énergie & Souveraineté",
     "ecologie": "Transition écologique",
-    "techno": "Numérique & Société",
+    "techno": "Institutions & droit",
 }
 ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # sans caractères ambigus (i, l, o, 0, 1)
 ID_LENGTH, CODE_LENGTH = 8, 6

@@ -60,6 +60,9 @@ export const THEME_BADGES: Record<string, { name: string; badge: string }> = {
   techno: { name: 'Institutions & droit', badge: 'bg-gray-100 text-gray-700 border-gray-300' },
 }
 
+/** Thèmes proposables à la création d'un salon (liste blanche côté serveur : `THEMES`). */
+export const CREATABLE_THEMES = ['social', 'souverain', 'ecologie', 'techno'] as const
+
 export function themeBadge(theme: string) {
   return THEME_BADGES[theme] ?? THEME_BADGES.techno!
 }
