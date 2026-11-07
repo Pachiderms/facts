@@ -6,7 +6,7 @@ from app.core.config import Settings
 from app.core.schemas import CheckResponse, View
 from app.main import create_app
 from tests.test_api_check import ASSERTION, URL, FakeService, ok_response
-from tests.test_api_rooms import CLAIM, WS, FakeService as RoomService, recv_until, send_message
+from tests.test_api_rooms import CLAIM, FakeService as RoomService, connect, recv_until, send_message
 
 
 def check_client(**kw):
@@ -61,7 +61,7 @@ def test_per_minute_limit_still_applies_independently():
 def test_websocket_daily_message_limit():
     settings = Settings(_env_file=None, daily_ws_message_limit=1, ws_messages_per_minute=100)
     client = TestClient(create_app(settings, service=RoomService()))
-    with client.websocket_connect(WS, headers={"origin": "http://localhost:5173"}) as ws:
+    with connect(client, headers={"origin": "http://localhost:5173"}) as ws:
         send_message(ws, CLAIM)
         recv_until(ws, "message")
         send_message(ws, CLAIM)

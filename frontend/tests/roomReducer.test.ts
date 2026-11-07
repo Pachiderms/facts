@@ -20,6 +20,7 @@ const room = (over: Partial<RoomSummary> = {}): RoomSummary => ({
   title: 'Titre',
   category: 'Cat',
   theme_category: 'social',
+  visibility: 'public',
   trust_score: null,
   message_count: 0,
   participants: 1,
@@ -100,5 +101,29 @@ describe('roomReducer', () => {
     expect(s.status).toBe('open')
     s = apply(s, { type: 'message', message: msg(1), trust_score: 40 })
     expect(roomReducer(s, { type: 'reset' })).toEqual(initialRoomState)
+  })
+})
+
+describe('accès refusé', () => {
+  it.each(['invalid_code', 'too_many_attempts', 'session_replaced'] as const)('%s : mémorisé sans notification générique', (code) => {
+    const next = apply(initialRoomState, { type: 'error', code, detail: 'x' })
+    expect(next.denied).toBe(code)
+    expect(next.notice).toBeNull()
+  })
+
+  it('les autres erreurs restent des notifications', () => {
+    const next = apply(initialRoomState, { type: 'error', code: 'rate_limited', detail: 'Trop de messages.' })
+    expect(next.denied).toBeNull()
+    expect(next.notice).toBe('Trop de messages.')
+  })
+
+  it('reset efface le refus (changement de code ou de salon)', () => {
+    const denied = apply(initialRoomState, { type: 'error', code: 'invalid_code', detail: 'x' })
+    expect(roomReducer(denied, { type: 'reset' }).denied).toBeNull()
+  })
+
+  it('le snapshot d’un propriétaire transmet le code d’accès', () => {
+    const next = apply(initialRoomState, { type: 'snapshot', role: 'A', room: room({ visibility: 'private', access_code: 'k7m2xq' }), messages: [] })
+    expect(next.room?.access_code).toBe('k7m2xq')
   })
 })

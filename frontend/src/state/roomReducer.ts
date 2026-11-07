@@ -15,7 +15,12 @@ export interface RoomState {
   deltas: Record<number, number>
   /** Message d'erreur serveur à afficher (rate limit, rôle...), effaçable. */
   notice: string | null
+  /** Accès refusé à l'ouverture : l'interface propose alors l'action adaptée (saisir le code...). */
+  denied: DeniedReason | null
 }
+
+export type DeniedReason = 'invalid_code' | 'too_many_attempts' | 'session_replaced'
+const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 'session_replaced']
 
 export const initialRoomState: RoomState = {
   status: 'connecting',
@@ -26,6 +31,7 @@ export const initialRoomState: RoomState = {
   trustScore: null,
   deltas: {},
   notice: null,
+  denied: null,
 }
 
 export type RoomAction =
@@ -77,6 +83,7 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
             deltas: event.trust_delta ? { ...state.deltas, [event.message_id]: event.trust_delta } : state.deltas,
           }
         case 'error':
+          if (DENIED_CODES.includes(event.code)) return { ...state, denied: event.code as DeniedReason }
           // `detail` est un message serveur générique en français, sûr à afficher.
           return { ...state, notice: event.detail || 'Une erreur est survenue.' }
       }

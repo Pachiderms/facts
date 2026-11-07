@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiBase, checkAssertion, isCheckResponse, listRooms, wsBase } from '../src/api/client'
+import { ApiError, apiBase, checkAssertion, createRoom, isCheckResponse, listRooms, lookupRoom, wsBase } from '../src/api/client'
 import type { CheckResponse } from '../src/api/types'
 
 const OK: CheckResponse = {
@@ -106,14 +106,111 @@ describe('isCheckResponse', () => {
   ])('rejette : %s', (_name, value) => expect(isCheckResponse(value)).toBe(false))
 })
 
+const ROOM = {
+  id: 'room-1',
+  title: 'SMIC',
+  category: 'Économie',
+  theme_category: 'social',
+  visibility: 'public',
+  trust_score: null,
+  message_count: 0,
+  participants: 0,
+  spectators: 0,
+}
+
 describe('listRooms', () => {
   it('retourne la liste', async () => {
-    fetchMock.mockResolvedValue(json([{ id: 'room-1' }]))
+    fetchMock.mockResolvedValue(json([ROOM]))
     expect(await listRooms()).toHaveLength(1)
+    expect(fetchMock.mock.calls[0]![0]).toMatch(/\/api\/v1\/rooms$/)
+  })
+
+  it('transmet la recherche, encodée et bornée à 60 caractères', async () => {
+    fetchMock.mockImplementation(async () => json([])) // une réponse neuve à chaque appel (corps lisible une fois)
+    await listRooms('  électricité & prix  ')
+    expect(fetchMock.mock.calls[0]![0]).toMatch(/\/api\/v1\/rooms\?q=%C3%A9lectricit%C3%A9%20%26%20prix$/)
+    await listRooms('x'.repeat(100))
+    expect(fetchMock.mock.calls[1]![0]).toMatch(/q=x{60}$/)
   })
 
   it('rejette une réponse qui n’est pas une liste', async () => {
     fetchMock.mockResolvedValue(json({ rooms: [] }))
     await expect(listRooms()).rejects.toMatchObject({ status: 502 })
+  })
+
+  it.each([
+    ['visibilité absente', { ...ROOM, visibility: undefined }],
+    ['visibilité inconnue', { ...ROOM, visibility: 'secret' }],
+    ['titre non textuel', { ...ROOM, title: 42 }],
+    ['score invalide', { ...ROOM, trust_score: 'haut' }],
+  ])('rejette un salon hors contrat : %s', async (_n, bad) => {
+    fetchMock.mockResolvedValue(json([bad]))
+    await expect(listRooms()).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('lookupRoom', () => {
+  it('retourne un salon public avec son résumé', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'room-1', visibility: 'public', requires_code: false, room: ROOM }))
+    expect((await lookupRoom('room-1')).room?.title).toBe('SMIC')
+  })
+
+  it('un salon privé ne contient aucun résumé', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'abcd2345', visibility: 'private', requires_code: true, room: null }))
+    expect(await lookupRoom('abcd2345')).toMatchObject({ requires_code: true, room: null })
+  })
+
+  it('encode l’identifiant dans l’URL', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'x', visibility: 'public', requires_code: false, room: null }))
+    await lookupRoom('a/../b')
+    expect(fetchMock.mock.calls[0]![0]).toMatch(/\/api\/v1\/rooms\/a%2F\.\.%2Fb$/)
+  })
+
+  it('404 : message du serveur conservé', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Salon introuvable.' }, { status: 404 }))
+    await expect(lookupRoom('zzzzzzzz')).rejects.toMatchObject({ status: 404, message: 'Salon introuvable.' })
+  })
+
+  it('rejette une réponse hors contrat', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'x', visibility: 'public' }))
+    await expect(lookupRoom('x')).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('createRoom', () => {
+  const INPUT = { title: 'Faut-il un revenu universel ?', theme_category: 'social', visibility: 'private' as const }
+
+  beforeEach(() => localStorage.clear())
+
+  it('envoie le jeton d’identité du navigateur avec la demande, jamais dans l’URL', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'abcd2345', visibility: 'private', access_code: 'k7m2xq' }, { status: 201 }))
+    const created = await createRoom(INPUT)
+    expect(created).toEqual({ id: 'abcd2345', visibility: 'private', access_code: 'k7m2xq' })
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).not.toContain(localStorage.getItem('facts.participant'))
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ ...INPUT, participant_token: localStorage.getItem('facts.participant') })
+  })
+
+  it('un salon public n’a pas de code', async () => {
+    fetchMock.mockResolvedValue(json({ id: 'abcd2345', visibility: 'public', access_code: null }, { status: 201 }))
+    expect((await createRoom({ ...INPUT, visibility: 'public' })).access_code).toBeNull()
+  })
+
+  it('limite quotidienne : message du serveur et Retry-After', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Limite quotidienne de création de salons atteinte. Revenez demain.' }, { status: 429, headers: { 'retry-after': '3600' } }))
+    await expect(createRoom(INPUT)).rejects.toMatchObject({ status: 429, retryAfter: 3600, message: expect.stringContaining('Revenez demain') })
+  })
+
+  it('422 de validation : message adapté aux salons (pas celui des affirmations)', async () => {
+    fetchMock.mockResolvedValue(json({ detail: [{ loc: ['body', 'title'], msg: 'x' }] }, { status: 422 }))
+    const error = await createRoom(INPUT).catch((e: unknown) => e)
+    expect((error as ApiError).message).toMatch(/titre/i)
+    expect((error as ApiError).message).not.toMatch(/affirmation/i)
+  })
+
+  it('rejette une réponse hors contrat', async () => {
+    fetchMock.mockResolvedValue(json({ id: 42 }, { status: 201 }))
+    await expect(createRoom(INPUT)).rejects.toMatchObject({ status: 502 })
   })
 })

@@ -29,11 +29,36 @@ export interface RoomSummary {
   title: string
   category: string
   theme_category: string
+  visibility: 'public' | 'private'
+  /** Présent uniquement dans le snapshot envoyé au PROPRIÉTAIRE d'un salon privé. */
+  access_code?: string
   /** `null` tant qu'aucun message vérifiable n'a été évalué. */
   trust_score: number | null
   message_count: number
   participants: number
   spectators: number
+}
+
+export type Visibility = 'public' | 'private'
+
+/** Résultat d'une recherche par ID : un salon privé ne révèle ni titre ni contenu. */
+export interface RoomLookup {
+  id: string
+  visibility: Visibility
+  requires_code: boolean
+  room: RoomSummary | null
+}
+
+export interface CreateRoomInput {
+  title: string
+  theme_category: string
+  visibility: Visibility
+}
+
+export interface CreatedRoom {
+  id: string
+  visibility: Visibility
+  access_code: string | null
 }
 
 export type Role = 'A' | 'B' | 'spectator'
@@ -89,3 +114,5 @@ export type ServerEvent =
 export const ASSERTION_MIN = 10
 export const ASSERTION_MAX = 500
 export const MESSAGE_MAX = 500
+export const ROOM_TITLE_MIN = 10
+export const ROOM_TITLE_MAX = 120
