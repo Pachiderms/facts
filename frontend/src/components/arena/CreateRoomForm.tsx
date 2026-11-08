@@ -1,6 +1,6 @@
 import { Globe, Lock, Sparkles } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { createRoom, reformulateTitle, type Reformulation } from '../../api/client'
+import { ApiError, createRoom, reformulateTitle, type Reformulation } from '../../api/client'
 import { PARTICIPANTS_MAX, PARTICIPANTS_MIN, ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
 import { recordVisit } from '../../lib/history'
 import { rememberCode } from '../../lib/identity'
@@ -26,7 +26,10 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
 
   const trimmed = title.trim()
   const tooShort = trimmed.length < ROOM_TITLE_MIN
-  const canSubmit = !tooShort && !busy
+  // Sujet refusé par l'IA (hors débat, illégal...) : création bloquée tant que le titre n'est pas modifié.
+  const [refusedTitle, setRefusedTitle] = useState<string | null>(null)
+  const refused = refusedTitle !== null && refusedTitle === trimmed
+  const canSubmit = !tooShort && !busy && !refused
 
   const editTitle = (value: string) => {
     setTitle(value)
@@ -46,7 +49,10 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
       const result = await reformulateTitle(trimmed, controller.signal)
       if (!controller.signal.aborted) setSuggestion(result)
     } catch (err) {
-      if (!controller.signal.aborted) setSuggestError(err instanceof Error ? err.message : 'Reformulation impossible. Réessayez.')
+      if (!controller.signal.aborted) {
+        if (err instanceof ApiError && err.status === 422) setRefusedTitle(trimmed)
+        setSuggestError(err instanceof Error ? err.message : 'Reformulation impossible. Réessayez.')
+      }
     } finally {
       if (!controller.signal.aborted) setSuggesting(false)
     }
@@ -72,6 +78,7 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
       if (created.access_code) rememberCode(created.id, created.access_code)
       window.location.hash = roomHref(created.id)
     } catch (err) {
+      if (err instanceof ApiError && err.status === 422) setRefusedTitle(trimmed) // le serveur a refusé ce sujet
       setError(err instanceof Error ? err.message : 'Création impossible. Réessayez.')
       inFlight.current = false
       setBusy(false)
@@ -225,6 +232,12 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
       {error && (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-900">
           {error}
+        </p>
+      )}
+
+      {refused && !error && !suggestError && (
+        <p role="status" className="text-[11px] font-medium text-neutral-600">
+          Ce sujet a été refusé : modifiez le titre pour pouvoir créer le salon.
         </p>
       )}
 

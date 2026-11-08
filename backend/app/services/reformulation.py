@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.adapters.llm import LLMError, LLMProvider, parse_json_object
+from app.core.cache import TTLCache
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
 from app.core.text import fit_sentences
 from app.services.rooms import THEMES
@@ -59,8 +60,25 @@ class Reformulation:
 
 
 class ThemeReformulator:
-    def __init__(self, llm: LLMProvider, *, title_min: int = 10, title_max: int = 120, input_max: int = 400) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        *,
+        title_min: int = 10,
+        title_max: int = 120,
+        input_max: int = 400,
+        approved_ttl_seconds: float = 3600,
+    ) -> None:
         self._llm, self._min, self._max, self._input_max = llm, title_min, title_max, input_max
+        # Titres déjà jugés pertinents : évite un second appel LLM quand on crée avec la proposition.
+        self._approved: TTLCache[bool] = TTLCache(approved_ttl_seconds, 500)
+
+    @staticmethod
+    def _key(title: str) -> str:
+        return " ".join(title.casefold().split())
+
+    def is_approved(self, title: str) -> bool:
+        return self._approved.get(self._key(title)) is not None
 
     async def reformulate(self, raw_title: str) -> Reformulation:
         clean = sanitize_text(raw_title, self._input_max)  # InvalidInputError : vide / trop long
@@ -79,6 +97,8 @@ class ThemeReformulator:
                 raise ReformulationRefused(self._reason(out.reason))
             checked = self._validate(out)
             if checked is not None:
+                self._approved.set(self._key(clean), True)
+                self._approved.set(self._key(checked.title), True)
                 return checked
             logger.warning("reformulation rejetée par la validation (tentative %d/%d)", attempt, ATTEMPTS)
         raise ReformulationError("Le modèle n'a pas produit de reformulation valide.")

@@ -209,6 +209,29 @@ async def reformulate_room_title(request: Request, body: ReformulateRequest):
     return Reformulated(title=result.title, theme_category=result.theme_category)
 
 
+async def _ensure_relevant(request: Request, title: str, ip: str) -> None:
+    """Refuse (422) un sujet que l'IA juge hors débat ou illégal.
+
+    Ouvert en cas de panne : si l'IA est indisponible, saturée ou si le quota de contrôles du jour
+    est épuisé, la création reste possible (au pire 3 salons par jour et par visiteur, supprimés après
+    30 min d'inactivité). Un titre déjà approuvé (reformulation acceptée) n'appelle pas l'IA.
+    """
+    reformulator = request.app.state.reformulator
+    if reformulator is None or reformulator.is_approved(title):
+        return
+    if not request.app.state.daily_reformulation_limiter.allow(ip):
+        logger.warning("contrôle de pertinence ignoré : quota quotidien atteint")
+        return
+    try:
+        await reformulator.reformulate(title)
+    except ReformulationRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except (LLMError, ReformulationError):
+        logger.warning("contrôle de pertinence indisponible : création autorisée")
+
+
 @router.post("/rooms", response_model=CreatedRoom, status_code=201, dependencies=[Depends(enforce_rate_limit)])
 async def create_room(request: Request, body: CreateRoomRequest):
     app = request.app
@@ -222,8 +245,13 @@ async def create_room(request: Request, body: CreateRoomRequest):
     if looks_like_prompt_injection(title):
         raise HTTPException(status_code=422, detail="Titre refusé.")
 
-    # Après la validation : une requête invalide ne consomme pas le quota quotidien.
+    # Pertinence du sujet : le bouton « reformuler » est facultatif, donc le contrôle est aussi côté
+    # serveur (sinon il suffirait de ne pas cliquer pour créer un salon poubelle). Avant le quota de
+    # création : un sujet refusé ne coûte rien à l'utilisateur.
     ip = get_client_ip(request, settings.trust_proxy_headers)
+    await _ensure_relevant(request, title, ip)
+
+    # Après la validation : une requête invalide ne consomme pas le quota quotidien.
     limiter = app.state.daily_room_limiter
     if not limiter.allow(ip):
         raise HTTPException(

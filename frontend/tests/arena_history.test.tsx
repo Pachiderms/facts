@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../src/api/client'
 import type { RoomSummary } from '../src/api/types'
 
 const api = vi.hoisted(() => ({ createRoom: vi.fn(), deleteRoom: vi.fn(), roomsStatus: vi.fn(), reformulateTitle: vi.fn() }))
@@ -218,5 +219,40 @@ describe('CreateRoomForm : reformulation par l’IA', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
     await screen.findByText(/réformer la fiscalité/)
     expect(container.querySelector('img')).toBeNull()
+  })
+})
+
+describe('CreateRoomForm : sujet refusé par l’IA', () => {
+  const type = (text: string) => userEvent.type(screen.getByLabelText(/Sujet du débat/i), text)
+  const submit = () => screen.getByRole('button', { name: /Créer le salon/ })
+
+  it('la création est désactivée tant que le titre refusé n’est pas modifié', async () => {
+    api.reformulateTitle.mockRejectedValue(new ApiError(422, 'Le sujet ne constitue pas un débat pertinent.'))
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('azerty qsdfgh wxcvbn')
+    expect(submit()).toBeEnabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('débat pertinent')
+    expect(submit()).toBeDisabled()
+    await type(' ?')
+    expect(submit()).toBeEnabled() // titre modifié : nouvelle chance
+  })
+
+  it('un refus du serveur à la création bloque aussi ce titre', async () => {
+    api.createRoom.mockRejectedValue(new ApiError(422, 'Le sujet ne constitue pas un débat pertinent.'))
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('azerty qsdfgh wxcvbn')
+    await userEvent.click(submit())
+    expect(await screen.findByRole('alert')).toHaveTextContent('débat pertinent')
+    expect(submit()).toBeDisabled()
+  })
+
+  it('une panne réseau ou un 429 ne bloque pas la création', async () => {
+    api.reformulateTitle.mockRejectedValue(new ApiError(429, 'Limite quotidienne atteinte.'))
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('Faut-il réformer la fiscalité ?')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    await screen.findByRole('alert')
+    expect(submit()).toBeEnabled()
   })
 })
