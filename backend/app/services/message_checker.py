@@ -10,10 +10,18 @@ from app.services.factcheck import FactCheckService
 
 BadgeType = Literal["green", "amber", "red", "gray"]
 
-# Contrôle des coûts : on ne lance la recherche web + le LLM que si le message contient
-# de quoi vérifier (un chiffre, un pourcentage, une référence à une source). Heuristique
-# volontairement simple et remplaçable ; un message sans chiffre reste « argument ».
-_CHECKABLE_RE = re.compile(r"\d|%|\bselon\b|d['’]après|\b[ée]tude\b|\brapport\b|\binsee\b|\bofce\b|\btr[ée]sor\b|cour des comptes", re.IGNORECASE)
+# Contrôle des coûts : on ne lance la recherche web + le LLM que si le message contient de quoi
+# vérifier : un chiffre, un pourcentage, une quantité écrite en lettres (« plusieurs dizaines de
+# milliards », « la moitié »), une comparaison chiffrée ou une référence à une source. Heuristique
+# volontairement simple et remplaçable ; un message sans rien de tel reste « argument ».
+_CHECKABLE_RE = re.compile(
+    r"\d|%"
+    r"|\b(?:milliards?|millions?|milliers?|mille|dizaines?|centaines?|pourcent\w*|taux|moiti[ée]|tiers|quarts?)\b"
+    r"|\b(?:deux|trois|quatre|cinq|six|sept|huit|neuf|dix|onze|douze|quinze|vingt|trente|quarante|cinquante|soixante|cent)s?\b"
+    r"|\bfois\s+(?:plus|moins)\b|\b(?:doubl|tripl)\w*"
+    r"|\bselon\b|d['’]après|\b[ée]tudes?\b|\brapports?\b|\binsee\b|\bofce\b|\btr[ée]sor\b|cour des comptes",
+    re.IGNORECASE,
+)
 
 
 def is_checkable(text: str) -> bool:

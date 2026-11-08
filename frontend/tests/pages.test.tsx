@@ -205,8 +205,8 @@ describe('ArenaPage (liste des salons)', () => {
   it('chaque salon est un lien vers sa propre page ; score absent « — », présent tel quel', () => {
     hooks.useRooms.mockReturnValue({ rooms: [room(), room({ id: 'room-2', title: 'Électricité', trust_score: 84 })], error: null })
     render(<ArenaPage />)
-    expect(screen.getByRole('link', { name: /SMIC/ })).toHaveAttribute('href', '#/arena/room-1')
-    expect(screen.getByRole('link', { name: /Électricité/ })).toHaveAttribute('href', '#/arena/room-2')
+    expect(screen.getByRole('link', { name: /^(?!Regarder).*SMIC/ })).toHaveAttribute('href', '#/arena/room-1')
+    expect(screen.getByRole('link', { name: /^(?!Regarder).*Électricité/ })).toHaveAttribute('href', '#/arena/room-2')
     expect(screen.getByText('Score : —')).toBeInTheDocument()
     expect(screen.getByText('Score : 84')).toBeInTheDocument()
   })
@@ -254,7 +254,7 @@ describe('ArenaPage (liste des salons)', () => {
     hooks.useRoomLookup.mockReturnValue(found())
     render(<ArenaPage />)
     expect(screen.queryByRole('link', { name: 'Rejoindre le salon privé' })).not.toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: /SMIC/ })).toHaveLength(1)
+    expect(screen.getAllByRole('link', { name: /^(?!Regarder).*SMIC/ })).toHaveLength(1)
   })
 })
 
@@ -398,7 +398,7 @@ describe('RoomPage (une room = une page)', () => {
   it('salon public : se connecte sans code, avec lien de retour et ID copiable', () => {
     hooks.useRoomLookup.mockReturnValue(found())
     render(<RoomPage id="room-1" />)
-    expect(hooks.useRoom).toHaveBeenLastCalledWith('room-1', undefined)
+    expect(hooks.useRoom).toHaveBeenLastCalledWith('room-1', undefined, false)
     expect(screen.getByRole('link', { name: /Tous les salons/ })).toHaveAttribute('href', '#/arena')
     expect(screen.getByRole('button', { name: 'Copier id' })).toBeInTheDocument()
     expect(screen.queryByText('Salon privé')).not.toBeInTheDocument()
@@ -420,7 +420,7 @@ describe('RoomPage (une room = une page)', () => {
     sessionStorage.setItem('facts.code.room-1', 'k7m2xq')
     hooks.useRoomLookup.mockReturnValue(found())
     render(<RoomPage id="room-1" />)
-    expect(hooks.useRoom).toHaveBeenLastCalledWith('room-1', 'k7m2xq')
+    expect(hooks.useRoom).toHaveBeenLastCalledWith('room-1', 'k7m2xq', false)
   })
 
   it('code requis : formulaire ; la saisie reconnecte avec le code et le mémorise', async () => {
@@ -430,7 +430,7 @@ describe('RoomPage (une room = une page)', () => {
     expect(screen.getByRole('heading', { name: /Salon privé/ })).toBeInTheDocument()
     expect(screen.queryByText(/Code invalide/)).not.toBeInTheDocument() // premier passage : pas de reproche
     await userEvent.type(screen.getByLabelText('Code d’accès'), 'k7m2xq{Enter}')
-    expect(hooks.useRoom).toHaveBeenLastCalledWith('abcd2345', 'k7m2xq')
+    expect(hooks.useRoom).toHaveBeenLastCalledWith('abcd2345', 'k7m2xq', false)
     expect(sessionStorage.getItem('facts.code.abcd2345')).toBe('k7m2xq')
     expect(screen.queryByRole('form', { name: 'Code d\'accès' })).not.toBeInTheDocument()
   })

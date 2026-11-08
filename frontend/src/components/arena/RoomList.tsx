@@ -1,4 +1,4 @@
-import { RefreshCw, Users } from 'lucide-react'
+import { Eye, RefreshCw, Users } from 'lucide-react'
 import { useState } from 'react'
 import type { RoomSummary } from '../../api/types'
 import { formatScore, themeBadge, trustTone } from '../../lib/presentation'
@@ -12,6 +12,7 @@ interface Props {
 }
 
 const PAGE_SIZE = 9
+const SPECTATORS_MAX = 20
 
 export function RoomList({ rooms, error, searching }: Props) {
   const [theme, setTheme] = useState<string>('all')
@@ -90,9 +91,10 @@ function RoomCard({ room }: { room: RoomSummary }) {
   const badge = themeBadge(room.theme_category)
   const tone = trustTone(room.trust_score)
   return (
+    <div className="flex h-full flex-col rounded-xl border border-neutral-200 bg-white shadow-sm transition-all focus-within:border-neutral-400 hover:border-neutral-400 hover:shadow-md">
     <a
       href={roomHref(room.id)}
-      className="block h-full rounded-xl border border-neutral-200 bg-white p-4 shadow-sm transition-all hover:border-neutral-400 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+      className="block flex-1 rounded-t-xl p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
     >
       <span className={`mb-2 inline-block rounded border px-2 py-0.5 text-[10px] font-bold ${badge.badge}`}>{badge.name}</span>
       <span className="line-clamp-3 block text-sm font-bold leading-snug text-neutral-900">{room.title}</span>
@@ -105,5 +107,16 @@ function RoomCard({ room }: { room: RoomSummary }) {
         <span className={`rounded px-1.5 py-0.5 font-mono font-bold ${tone.badge}`}>Score : {formatScore(room.trust_score)}</span>
       </span>
     </a>
+    {room.spectators_allowed && room.spectators < SPECTATORS_MAX && (
+      <a
+        href={roomHref(room.id, true)}
+        className="flex items-center justify-center gap-1.5 rounded-b-xl border-t border-neutral-100 px-4 py-2 text-[11px] font-bold text-neutral-600 hover:bg-neutral-50 hover:text-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+      >
+        <Eye className="h-3 w-3" aria-hidden="true" />
+        Regarder en spectateur
+        <span className="sr-only"> : {room.title}</span>
+      </a>
+    )}
+    </div>
   )
 }

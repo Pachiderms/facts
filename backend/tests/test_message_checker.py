@@ -15,6 +15,12 @@ from app.services.message_checker import FactCheckMessageChecker, MessageCheck, 
         "Une étude de l'OFCE le démontre.",
         "Le rapport de la Cour des comptes est clair.",
         "L'Espagne a augmenté son salaire minimum de 47% en 5 ans.",
+        # quantités écrites en lettres : doivent aussi être vérifiées
+        "On remplirait les caisses avec plusieurs dizaines de milliards grâce à l'impôt sur la fortune.",
+        "Cela rapporterait des centaines de millions d'euros.",
+        "La moitié des Français est concernée.",
+        "Les prix ont doublé en dix ans.",
+        "Ce serait trois fois plus cher.",
     ],
 )
 def test_checkable(text):
@@ -23,7 +29,12 @@ def test_checkable(text):
 
 @pytest.mark.parametrize(
     "text",
-    ["Je ne suis pas d'accord avec cette approche.", "C'est une mauvaise idée, point final.", "Vous caricaturez ma position."],
+    [
+        "Je ne suis pas d'accord avec cette approche.",
+        "C'est une mauvaise idée, point final.",
+        "Vous caricaturez ma position.",
+        "Baisser les impôts des classes moyennes serait plus égalitaire.",
+    ],
 )
 def test_pure_opinions_are_not_sent_to_the_llm(text):
     assert not is_checkable(text)

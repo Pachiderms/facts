@@ -189,13 +189,20 @@ class Room:
 
     # ---------- connexions ----------
     def join(
-        self, send: SendFn, participant_id: str | None = None, close: Callable[[], Awaitable[None]] | None = None
+        self,
+        send: SendFn,
+        participant_id: str | None = None,
+        close: Callable[[], Awaitable[None]] | None = None,
+        spectate: bool = False,
     ) -> tuple[Client, Client | None]:
         """Synchrone et sans `await` : l'attribution des rôles est atomique (pas de course).
 
         Une même personne ne tient jamais deux sièges : si son identité est déjà connectée dans ce
         salon (autre onglet, reconnexion avant que l'ancienne socket ne soit détectée morte), la
         nouvelle connexion REMPLACE l'ancienne et hérite de son rôle. Renvoie (client, remplacé).
+
+        `spectate=True` : la personne choisit de regarder, même s'il reste des places d'intervenant
+        (elle ne prend alors aucun siège). Sans effet pour qui tient déjà un rôle dans le salon.
         """
         pid = participant_id or secrets.token_hex(8)
         replaced = next((c for c in self.clients.values() if c.participant_id == pid), None)
@@ -206,7 +213,7 @@ class Room:
             role = replaced.role
         else:
             taken = {c.role for c in self.clients.values()}
-            free_seat = next((seat for seat in self.seats if seat not in taken), None)
+            free_seat = None if spectate else next((seat for seat in self.seats if seat not in taken), None)
             if free_seat is not None:
                 role = free_seat
             elif not self.spectators_allowed:
