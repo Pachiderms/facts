@@ -2,6 +2,7 @@ import { ArrowLeft, Lock, UserX, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { SocketStatus } from '../../api/socket'
 import { isSeat, type RoomSummary } from '../../api/types'
+import { formatDuration } from '../../lib/presentation'
 import { useRoom } from '../../hooks/useRoom'
 import { recordVisit, removeEntry } from '../../lib/history'
 import { forgetCode } from '../../lib/identity'
@@ -34,7 +35,10 @@ interface Props {
 
 /** Un salon. Monté avec une `key` : changer de salon ou de code ferme proprement l'ancienne connexion. */
 export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spectate = false }: Props) {
-  const { status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice } = useRoom(roomId, code, spectate)
+  const {
+    status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
+    warning, reportNotice, banRetryAfter, report, dismissWarning, dismissReportNotice,
+  } = useRoom(roomId, code, spectate)
   const info = room ?? fallback
   const listRef = useRef<HTMLUListElement>(null)
   const stickToBottom = useRef(true)
@@ -85,6 +89,24 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
         >
           Reprendre ici
         </button>
+      </div>
+    )
+  }
+
+  if (denied === 'banned') {
+    return (
+      <div role="alert" className="mx-auto max-w-md space-y-3 rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-700 shadow-sm">
+        <p className="flex items-center justify-center gap-2 font-bold text-neutral-900">
+          <UserX className="h-4 w-4" aria-hidden="true" />
+          Exclusion temporaire
+        </p>
+        <p>
+          Vous êtes exclu des salons{banRetryAfter ? ` pendant encore ${formatDuration(banRetryAfter)}` : ' pour un temps'} en raison de messages
+          enfreignant les règles (racisme, insultes, menaces).
+        </p>
+        <a href="#/arena" className="inline-block text-xs font-bold text-neutral-900 underline-offset-2 hover:underline">
+          Retour aux salons
+        </a>
       </div>
     )
   }
@@ -177,6 +199,30 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
         </div>
       )}
 
+      {warning && (
+        <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          <span>
+            <strong className="font-extrabold">
+              {warning.level === 'final_warning' ? 'Dernier avertissement' : 'Avertissement'} ({warning.strikes}/{warning.maxStrikes})
+            </strong>
+            {' · '}
+            {warning.detail} Votre message n’a pas été publié.
+          </span>
+          <button type="button" onClick={dismissWarning} aria-label="Fermer l’avertissement" className="shrink-0 rounded p-0.5 hover:bg-amber-100">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {reportNotice && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-800">
+          <span>{reportNotice}</span>
+          <button type="button" onClick={dismissReportNotice} aria-label="Fermer" className="shrink-0 rounded p-0.5 hover:bg-neutral-100">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {status === 'closed' && (
         <p role="alert" className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-700">
           La connexion à ce salon est fermée (salon indisponible ou accès refusé). Choisissez un autre salon ou rechargez la page.
@@ -196,7 +242,15 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
             Aucun message pour l’instant. {isSeat(role) ? 'Lancez le débat !' : 'Le débat va bientôt commencer.'}
           </li>
         ) : (
-          messages.map((m) => <MessageCard key={m.id} message={m} delta={deltas[m.id]} alternate={(info?.max_participants ?? 2) === 2} />)
+          messages.map((m) => (
+            <MessageCard
+              key={m.id}
+              message={m}
+              delta={deltas[m.id]}
+              alternate={(info?.max_participants ?? 2) === 2}
+              onReport={m.speaker !== role ? report : undefined}
+            />
+          ))
         )}
       </ul>
 

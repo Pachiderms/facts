@@ -137,3 +137,17 @@ participants anonymes, rôles A/B attribués par le serveur.
 2. Reformulation du thème par l'agent, modération (avertissements, exclusion), kick encadré par un score individuel.
 3. Redis (offre gratuite) pour cache, rate limit et diffusion multi-instances.
 4. CI GitHub Actions : `pytest` à chaque push.
+
+## Modération (PR C)
+
+Chaque message d'un salon passe, **avant publication**, par `app/services/moderation.py` :
+
+1. **Filtre local gratuit** (texte normalisé : accents, leetspeak, lettres répétées) : insultes, menaces, racisme et haine évidents sont refusés sans appel LLM.
+2. **Juge LLM** uniquement pour les messages *douteux* (mots ambigus) : un appel court, message enfermé dans `<MESSAGE>`, sortie limitée à `{illegal, category}`. Aucun texte libre du LLM n'est montré : le message d'avertissement vient d'une table fixe. Un message qui tente une injection n'est pas transmis au juge. Si le LLM est indisponible, un message douteux passe (le filtre local, lui, bloque toujours).
+3. **Le débat reste libre** : critiquer idées, partis, responsables, même durement, est autorisé ; en cas de doute, on ne bloque pas.
+
+Sanctions par identité (jeton), en mémoire, bornées : **1er message illégal = avertissement, 2e = dernier avertissement, 3e = exclusion de 1 h** (`FACTS_MODERATION_BAN_SECONDS`). Le message refusé n'est pas publié. Les avertissements s'oublient après 24 h sans récidive. L'exclusion vaut pour **tous les salons** : refus au `hello` (`error` code `banned` + `retry_after`) et refus de tout message.
+
+**Signalement** : `{"type": "report", "message_id": N}` (entier strict). Un signalement ne sanctionne jamais directement : il déclenche un second avis (filtre + LLM). Si illégal, le message est remplacé par « [Message retiré par la modération] » (`message_removed`, score de confiance recalculé) et son auteur reçoit un avertissement. Garde-fous : pas d'auto-signalement, un signalement par personne et par message, un seul appel LLM par message quel que soit le nombre de signalements, 20 signalements jugés par jour et par identité, indisponibilité du juge = réessai possible, jamais de retrait.
+
+Événements serveur ajoutés : `moderation` (`warning` | `final_warning` | `banned`), `message_removed`, `report_result` (`removed` | `kept` | `unavailable` | `duplicate` | `own` | `unknown`, envoyé au seul signaleur).

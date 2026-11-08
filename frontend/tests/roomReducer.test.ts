@@ -129,3 +129,65 @@ describe('accès refusé', () => {
     expect(next.room?.access_code).toBe('k7m2xq')
   })
 })
+
+describe('modération', () => {
+  const base = (): RoomState => roomReducer(initialRoomState, { type: 'server', event: { type: 'snapshot', role: 'A', room: room(), messages: [msg(1, { check: VERIFIED }), msg(2, { speaker: 'B' })] } })
+  const server = (state: RoomState, event: ServerEvent) => roomReducer(state, { type: 'server', event })
+
+  it('un avertissement s’affiche et peut être fermé', () => {
+    const s = server(base(), { type: 'moderation', level: 'warning', strikes: 1, max_strikes: 3, detail: 'Les insultes sont interdites.' })
+    expect(s.warning).toEqual({ level: 'warning', strikes: 1, maxStrikes: 3, detail: 'Les insultes sont interdites.' })
+    expect(s.denied).toBeNull()
+    expect(roomReducer(s, { type: 'dismiss_warning' }).warning).toBeNull()
+  })
+
+  it('le dernier avertissement est distingué', () => {
+    const s = server(base(), { type: 'moderation', level: 'final_warning', strikes: 2, max_strikes: 3, detail: 'x' })
+    expect(s.warning?.level).toBe('final_warning')
+  })
+
+  it('l’exclusion bloque l’accès avec la durée restante', () => {
+    const s = server(base(), { type: 'moderation', level: 'banned', strikes: 3, max_strikes: 3, detail: 'x', retry_after: 3600 })
+    expect(s.denied).toBe('banned')
+    expect(s.banRetryAfter).toBe(3600)
+  })
+
+  it('refus à l’ouverture pour exclusion (error banned)', () => {
+    const s = server(initialRoomState, { type: 'error', code: 'banned', detail: 'x', retry_after: 1200 })
+    expect(s.denied).toBe('banned')
+    expect(s.banRetryAfter).toBe(1200)
+  })
+
+  it('un retry_after invalide est ignoré', () => {
+    const s = server(initialRoomState, { type: 'error', code: 'banned', detail: 'x', retry_after: 'abc' as unknown as number })
+    expect(s.banRetryAfter).toBeNull()
+  })
+
+  it('un message retiré est remplacé, sans badge ni delta, et le score est mis à jour', () => {
+    let s = server(base(), { type: 'check_result', message_id: 1, check: VERIFIED, trust_score: 80, trust_delta: 5 })
+    s = server(s, { type: 'message_removed', message_id: 1, text: '[Message retiré par la modération]', trust_score: 60, trust_delta: -20 })
+    const removed = s.messages.find((m) => m.id === 1)!
+    expect(removed).toMatchObject({ removed: true, text: '[Message retiré par la modération]' })
+    expect(removed.check).toMatchObject({ status: 'no_claim', sources: [] })
+    expect(s.deltas[1]).toBeUndefined()
+    expect(s.trustScore).toBe(60)
+    expect(s.messages.find((m) => m.id === 2)?.removed).toBeUndefined()
+  })
+
+  it.each([
+    ['removed', /retiré/],
+    ['kept', /respecte les règles/],
+    ['unavailable', /impossible/],
+    ['duplicate', /déjà signalé/],
+    ['own', /propre message/],
+  ] as const)('résultat de signalement %s', (outcome, text) => {
+    const s = server(base(), { type: 'report_result', message_id: 2, outcome })
+    expect(s.reportNotice).toMatch(text)
+    expect(roomReducer(s, { type: 'dismiss_report_notice' }).reportNotice).toBeNull()
+  })
+
+  it('un résultat de signalement inattendu retombe sur le message neutre', () => {
+    const s = server(base(), { type: 'report_result', message_id: 2, outcome: '<script>' as never })
+    expect(s.reportNotice).toMatch(/impossible/)
+  })
+})

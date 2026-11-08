@@ -161,8 +161,14 @@ const roomState = (over: Record<string, unknown> = {}) => ({
   deltas: {},
   notice: null,
   denied: null,
+  warning: null,
+  reportNotice: null,
+  banRetryAfter: null,
   send: vi.fn().mockReturnValue(true),
+  report: vi.fn().mockReturnValue(true),
   dismissNotice: vi.fn(),
+  dismissWarning: vi.fn(),
+  dismissReportNotice: vi.fn(),
   ...over,
 })
 
@@ -588,5 +594,62 @@ describe('App (routage)', () => {
     render(<App />)
     await userEvent.click(screen.getByRole('button', { name: 'Arène de débat' }))
     expect(window.location.hash).toBe('#/arena')
+  })
+})
+
+describe('RoomPage : modération', () => {
+  beforeEach(() => {
+    hooks.useRoomLookup.mockReturnValue(found())
+  })
+
+  it('affiche l’avertissement (n/3) et précise que le message n’a pas été publié', async () => {
+    const dismissWarning = vi.fn()
+    hooks.useRoom.mockReturnValue(
+      roomState({ warning: { level: 'warning', strikes: 1, maxStrikes: 3, detail: 'Les insultes sont interdites.' }, dismissWarning }),
+    )
+    render(<RoomPage id="room-1" />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/Avertissement \(1\/3\).*insultes.*n’a pas été publié/)
+    await userEvent.click(screen.getByRole('button', { name: 'Fermer l’avertissement' }))
+    expect(dismissWarning).toHaveBeenCalled()
+  })
+
+  it('le dernier avertissement est clairement indiqué', () => {
+    hooks.useRoom.mockReturnValue(roomState({ warning: { level: 'final_warning', strikes: 2, maxStrikes: 3, detail: 'x' } }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/Dernier avertissement \(2\/3\)/)
+  })
+
+  it('exclusion : écran dédié avec la durée restante, sans salon ni zone de saisie', () => {
+    hooks.useRoom.mockReturnValue(roomState({ denied: 'banned', banRetryAfter: 3600 }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/Exclusion temporaire.*1 h/)
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Retour aux salons' })).toHaveAttribute('href', '#/arena')
+  })
+
+  it('le bouton Signaler n’apparaît que sur les messages des autres', async () => {
+    const report = vi.fn()
+    const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+    const mk = (id: number, speaker: string) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', report, messages: [mk(1, 'A'), mk(2, 'B')] }))
+    render(<RoomPage id="room-1" />)
+    const buttons = screen.getAllByRole('button', { name: /Signaler/ })
+    expect(buttons).toHaveLength(1)
+    await userEvent.click(buttons[0]!)
+    expect(report).toHaveBeenCalledWith(2)
+  })
+
+  it('un spectateur peut signaler tous les messages', () => {
+    const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+    const mk = (id: number, speaker: string) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'spectator', messages: [mk(1, 'A'), mk(2, 'B')] }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.getAllByRole('button', { name: /Signaler/ })).toHaveLength(2)
+  })
+
+  it('affiche le retour du signalement', () => {
+    hooks.useRoom.mockReturnValue(roomState({ reportNotice: 'Merci : le message a été retiré par la modération.' }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.getByText(/le message a été retiré/)).toBeInTheDocument()
   })
 })

@@ -236,3 +236,22 @@ describe('Composer', () => {
     expect(screen.getByRole('textbox')).toHaveAttribute('maxlength', '500')
   })
 })
+
+describe('MessageCard : signalement et message retiré', () => {
+  it('propose « Signaler » seulement quand un gestionnaire est fourni, et l’appelle avec l’id', async () => {
+    const onReport = vi.fn()
+    const { rerender } = render(<ul><MessageCard message={message({ id: 7 })} /></ul>)
+    expect(screen.queryByRole('button', { name: /Signaler/ })).not.toBeInTheDocument()
+    rerender(<ul><MessageCard message={message({ id: 7 })} onReport={onReport} /></ul>)
+    await userEvent.click(screen.getByRole('button', { name: /Signaler le message de Participant A/ }))
+    expect(onReport).toHaveBeenCalledWith(7)
+  })
+
+  it('un message retiré n’affiche ni badge, ni source, ni bouton de signalement', () => {
+    const removed = message({ removed: true, text: '[Message retiré par la modération]' }, { status: 'no_claim', badge_text: 'RETIRÉ', note: 'x' })
+    render(<ul><MessageCard message={removed} onReport={vi.fn()} /></ul>)
+    expect(screen.getByText('[Message retiré par la modération]')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Signaler/ })).not.toBeInTheDocument()
+    expect(screen.getByText('[RETIRÉ]').closest('.hidden')).not.toBeNull() // masqué visuellement
+  })
+})

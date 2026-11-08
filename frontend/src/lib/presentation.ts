@@ -119,3 +119,15 @@ export function timeAgo(timestamp: number, now = Date.now()): string {
   const days = Math.floor(hours / 24)
   return `il y a ${days} j`
 }
+
+/** Durée lisible : « 1 h », « 42 min », « 30 s ». */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  if (s >= 3_600) {
+    const h = Math.floor(s / 3_600)
+    const m = Math.round((s % 3_600) / 60)
+    return m > 0 && m < 60 ? `${h} h ${m} min` : `${h + (m === 60 ? 1 : 0)} h`
+  }
+  if (s >= 60) return `${Math.ceil(s / 60)} min`
+  return `${s} s`
+}

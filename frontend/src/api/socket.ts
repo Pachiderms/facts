@@ -8,13 +8,13 @@ export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
  * 1008 : salon inconnu, code refusé ou origine refusée ; 4000 : même identité connectée dans un autre
  * onglet (cette connexion a cédé sa place). Réessayer ne changerait rien, voire se disputerait la place.
  */
-const NO_RETRY_CODES = new Set([1000, 1008, 1009, 4000])
+const NO_RETRY_CODES = new Set([1000, 1008, 1009, 4000]) // 1008 couvre aussi l'exclusion (« banned »)
 const BASE_DELAY_MS = 1_000
 const MAX_DELAY_MS = 30_000
 /** 1013 : « réessayez plus tard » (salon ou IP saturés) : on temporise davantage. */
 const BUSY_MIN_DELAY_MS = 10_000
 
-const EVENT_TYPES = new Set(['snapshot', 'presence', 'message', 'check_result', 'error'])
+const EVENT_TYPES = new Set(['snapshot', 'presence', 'message', 'check_result', 'error', 'moderation', 'message_removed', 'report_result'])
 
 /** Décode un événement serveur ; retourne `null` si la trame est invalide (ignorée). */
 export function parseServerEvent(raw: unknown): ServerEvent | null {
@@ -107,6 +107,13 @@ export class RoomSocket {
   send(text: string): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) return false
     this.ws.send(JSON.stringify({ type: 'message', text }))
+    return true
+  }
+
+  /** Signale le message d'un autre participant : un second avis (filtre + IA) décide, jamais le signaleur seul. */
+  report(messageId: number): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify({ type: 'report', message_id: messageId }))
     return true
   }
 

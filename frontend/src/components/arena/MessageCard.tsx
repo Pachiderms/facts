@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, RefreshCw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, Flag, RefreshCw, XCircle } from 'lucide-react'
 import type { RoomMessage } from '../../api/types'
 import { badgeTone, formatTime, safeHref } from '../../lib/presentation'
 
@@ -18,7 +18,18 @@ function BadgeIcon({ message }: { message: RoomMessage }) {
 }
 
 /** `alternate` : débat à deux, les messages se répondent de part et d'autre ; au-delà, tout est aligné. */
-export function MessageCard({ message, delta, alternate = true }: { message: RoomMessage; delta?: number; alternate?: boolean }) {
+export function MessageCard({
+  message,
+  delta,
+  alternate = true,
+  onReport,
+}: {
+  message: RoomMessage
+  delta?: number
+  alternate?: boolean
+  /** Fourni uniquement pour les messages des autres : permet de les signaler. */
+  onReport?: (messageId: number) => void
+}) {
   const isA = message.speaker === 'A'
   const tone = badgeTone(message.check.badge_type)
   const pending = message.check.status === 'pending'
@@ -37,9 +48,26 @@ export function MessageCard({ message, delta, alternate = true }: { message: Roo
         </time>
       </div>
 
-      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-800">{message.text}</p>
+      {message.removed ? (
+        <p className="text-sm italic leading-relaxed text-neutral-500">{message.text}</p>
+      ) : (
+        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-800">{message.text}</p>
+      )}
 
-      <div className="space-y-1.5 pt-1">
+      {!message.removed && onReport && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => onReport(message.id)}
+            aria-label={`Signaler le message de ${message.speaker_name}`}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+          >
+            <Flag className="h-3 w-3" aria-hidden="true" /> Signaler
+          </button>
+        </div>
+      )}
+
+      <div className={`space-y-1.5 pt-1 ${message.removed ? 'hidden' : ''}`}>
         <div className="flex flex-wrap items-center gap-2">
           <span
             role={pending ? 'status' : undefined}

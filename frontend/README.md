@@ -46,3 +46,4 @@ Cloudflare Pages : racine `frontend`, commande `npm run build`, sortie `dist`, v
 - Lien d'invitation `#/arena/<id>?code=<code>` : le code est lu puis retiré de la barre d'adresse.
 - Le créateur d'un salon vide peut le supprimer (confirmation en deux temps).
 - « Proposer une reformulation » : l'IA suggère une question neutre et un thème ; rien n'est appliqué sans clic sur « Utiliser cette question ».
+- Modération : avertissement (1/3, 2/3) et écran d'exclusion avec durée restante ; bouton « Signaler » sur les messages des autres ; un message retiré est remplacé par un texte neutre. Le front affiche uniquement des textes fournis par notre serveur, rendus comme du texte.

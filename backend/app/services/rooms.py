@@ -20,6 +20,7 @@ from typing import Any
 from app.core.config import Settings
 from app.core.security import sanitize_text
 from app.services.message_checker import MessageCheck, MessageChecker, is_checkable
+from app.services.moderation import MAX_STRIKES, REMOVED_TEXT, Moderator, Sanction
 from app.services.trust import WEIGHTS, compute_trust_score, trust_delta
 
 logger = logging.getLogger("facts.rooms")
@@ -108,7 +109,12 @@ class Room:
         max_participants: int = 2,
         spectators_allowed: bool = True,
         clock: Callable[[], float] = time.monotonic,
+        moderator: Moderator | None = None,
     ) -> None:
+        self._moderator = moderator
+        self._authors: dict[int, str] = {}  # id de message -> identité de l'auteur (jamais diffusé)
+        self._reports: set[tuple[int, str]] = set()  # (message, signaleur) : un signalement par personne
+        self._reviewed: set[int] = set()  # messages déjà revus après signalement : un seul appel LLM
         self.id, self.title, self.category, self.theme_category = room_id, title, category, theme_category
         self.visibility, self._access_code, self.owner_id, self.permanent = visibility, access_code, owner_id, permanent
         if not MIN_PARTICIPANTS <= max_participants <= MAX_PARTICIPANTS:
@@ -264,11 +270,23 @@ class Room:
             return False
 
     # ---------- messages ----------
-    async def post_message(self, client: Client, text: str) -> dict[str, Any]:
+    async def post_message(self, client: Client, text: str) -> dict[str, Any] | None:
+        """Publie le message. Renvoie None s'il est refusé par la modération (l'auteur est prévenu)."""
         if client.role == "spectator":
             raise NotAllowedError("Les spectateurs ne peuvent pas intervenir.")
         clean = sanitize_text(text, self._max_chars)  # lève InvalidInputError si vide / trop long
         self.last_activity = self._clock()
+
+        if self._moderator is not None:
+            who = client.participant_id or client.id
+            remaining = self._moderator.ledger.ban_remaining(who)
+            if remaining:  # exclu (même depuis un autre salon) : on ne publie rien
+                await client.send(self._banned_event(remaining))
+                return None
+            verdict = await self._moderator.review(clean)
+            if not verdict.allowed:
+                await self._sanction(client, who, verdict.category, verdict.message)
+                return None
 
         needs_check = self._checkable(clean)
         self._next_id += 1
@@ -282,6 +300,10 @@ class Room:
             "check": (MessageCheck.pending() if needs_check else MessageCheck.no_claim()).model_dump(),
         }
         self.messages.append(message)
+        self._authors[message["id"]] = client.participant_id or client.id
+        if len(self._authors) > 2 * MAX_HISTORY:  # mémoire bornée : on ne garde que les messages encore visibles
+            visible = {m["id"] for m in self.messages}
+            self._authors = {k: v for k, v in self._authors.items() if k in visible}
         # Copie profonde : le message sera modifié quand la vérification se terminera.
         await self.broadcast({"type": "message", "message": copy.deepcopy(message), "trust_score": self.trust_score})
 
@@ -306,6 +328,8 @@ class Room:
             finally:
                 limits.pending -= 1
 
+        if message.get("removed"):  # retiré par la modération pendant la vérification : on n'en tient plus compte
+            return
         message["check"] = check.model_dump()
         old = self.trust_score
         if check.status in WEIGHTS:
@@ -320,6 +344,94 @@ class Room:
                 "trust_delta": trust_delta(old, new) if check.status in WEIGHTS else 0,
             }
         )
+
+    # ---------- modération ----------
+    @property
+    def moderator(self) -> Moderator | None:
+        return self._moderator
+
+    def is_banned(self, client: Client) -> bool:
+        return self._moderator is not None and self._moderator.ledger.ban_remaining(client.participant_id or client.id) > 0
+
+    @staticmethod
+    def _banned_event(retry_after: int) -> dict[str, Any]:
+        return {
+            "type": "moderation",
+            "level": "banned",
+            "strikes": MAX_STRIKES,
+            "max_strikes": MAX_STRIKES,
+            "retry_after": retry_after,
+            "detail": "Vous êtes exclu des salons pour une heure en raison de messages répétés enfreignant les règles.",
+        }
+
+    async def _sanction(self, client: Client | None, who: str, category: str | None, reason: str) -> Sanction:
+        """Applique un avertissement (ou l'exclusion au 3e) et prévient la personne, si elle est connectée."""
+        assert self._moderator is not None
+        sanction = self._moderator.ledger.add_strike(who)
+        if client is None:
+            client = next((c for c in self.clients.values() if (c.participant_id or c.id) == who), None)
+        if client is not None:
+            if sanction.level == "banned":
+                event = self._banned_event(sanction.retry_after or 0)
+            else:
+                final = sanction.level == "final_warning"
+                event = {
+                    "type": "moderation",
+                    "level": sanction.level,
+                    "strikes": sanction.strikes,
+                    "max_strikes": MAX_STRIKES,
+                    "category": category,
+                    "detail": reason + (" Prochain message illégal : exclusion d'une heure." if final else " Ceci est un avertissement."),
+                }
+            try:
+                await client.send(event)
+            except Exception:
+                pass  # connexion déjà fermée
+        return sanction
+
+    async def report(self, reporter: Client, message_id: int) -> str:
+        """Signalement d'un message. Ne sanctionne jamais directement : un second avis (filtre + LLM) tranche.
+
+        Retourne : removed | kept | unavailable | duplicate | own | unknown.
+        """
+        message = next((m for m in self.messages if m["id"] == message_id), None)
+        if message is None or message.get("removed"):
+            return "unknown"
+        who = reporter.participant_id or reporter.id
+        author = self._authors.get(message_id)
+        if author is not None and author == who:
+            return "own"
+        if (message_id, who) in self._reports:
+            return "duplicate"
+        if len(self._reports) > 1_000:  # mémoire bornée : on ne garde que les messages encore visibles
+            visible = {m["id"] for m in self.messages}
+            self._reports = {r for r in self._reports if r[0] in visible}
+            self._reviewed &= visible
+        self._reports.add((message_id, who))
+        if self._moderator is None:
+            return "unavailable"
+        if message_id in self._reviewed:
+            return "kept"  # déjà revu et conservé : pas de nouvel appel
+        verdict = await self._moderator.review_reported(message["text"])
+        if verdict is None:
+            self._reports.discard((message_id, who))  # impossible de juger : on pourra re-signaler plus tard
+            return "unavailable"
+        self._reviewed.add(message_id)
+        if verdict.allowed:
+            return "kept"
+
+        old = self.trust_score
+        status = message.get("check", {}).get("status")
+        if status in WEIGHTS and self.counts[status] > 0:
+            self.counts[status] -= 1
+        message.update({"removed": True, "text": REMOVED_TEXT, "check": MessageCheck.no_claim().model_dump()})
+        await self.broadcast(
+            {"type": "message_removed", "message_id": message_id, "text": REMOVED_TEXT, "trust_score": self.trust_score,
+             "trust_delta": trust_delta(old, self.trust_score)}
+        )
+        if author is not None:
+            await self._sanction(None, author, verdict.category, verdict.message)
+        return "removed"
 
     async def aclose(self) -> None:
         for task in list(self._tasks):
@@ -430,7 +542,7 @@ class RoomRegistry:
         await asyncio.gather(*(r.aclose() for r in self._rooms.values()))
 
     @classmethod
-    def seeded(cls, checker: MessageChecker, settings: Settings) -> "RoomRegistry":
+    def seeded(cls, checker: MessageChecker, settings: Settings, moderator: Moderator | None = None) -> "RoomRegistry":
         limits = CheckLimits(
             settings.ws_max_concurrent_checks, settings.ws_max_pending_checks, settings.ws_check_timeout_seconds
         )
@@ -438,7 +550,7 @@ class RoomRegistry:
         def factory(**kw: Any) -> Room:
             return Room(
                 checker=checker, limits=limits,
-                max_message_chars=settings.ws_max_message_chars, max_clients=settings.ws_max_room_connections, **kw,
+                max_message_chars=settings.ws_max_message_chars, max_clients=settings.ws_max_room_connections, moderator=moderator, **kw,
             )
 
         rooms = [

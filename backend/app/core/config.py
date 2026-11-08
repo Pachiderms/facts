@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     max_rooms: int = 50
     room_idle_ttl_seconds: int = 1_800  # un salon non permanent, vide et inactif est supprimé
     daily_room_creation_limit: int = 3  # par visiteur et par jour
+    moderation_ban_seconds: int = 3600  # exclusion au 3e message illégal
+    moderation_strike_ttl_seconds: int = 86_400  # les avertissements s'oublient après 24 h sans récidive
+    moderation_timeout_seconds: float = 8.0
+    daily_report_review_limit: int = 20  # signalements jugés par le LLM, par identité et par jour
     daily_reformulation_limit: int = 10  # appels LLM de reformulation, par visiteur et par jour
     room_title_min_chars: int = 10
     room_title_max_chars: int = 120
