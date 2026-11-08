@@ -122,6 +122,12 @@ describe('RoomSocket', () => {
       expect(JSON.parse(current().sent[0]!)).toEqual({ type: 'hello', token: TOKEN, code: 'k7m2xq' })
     })
 
+    it('demande le mode spectateur dans « hello » seulement quand il est voulu', () => {
+      new RoomSocket('room-1', { onEvent: () => undefined, onStatus: () => undefined }, { token: TOKEN, spectate: true }).connect()
+      current().open()
+      expect(JSON.parse(current().sent[0]!)).toEqual({ type: 'hello', token: TOKEN, spectate: true })
+    })
+
     it('sans jeton fourni, utilise l’identité du navigateur (stable d’une connexion à l’autre)', () => {
       localStorage.clear()
       socket.connect()

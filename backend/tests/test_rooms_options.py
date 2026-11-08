@@ -349,3 +349,58 @@ def test_status_uses_the_light_read_quota():
     with make_client(read_rate_limit_requests=1) as c:
         assert c.get("/api/v1/rooms/status", params={"ids": "room-1"}).status_code == 200
         assert c.get("/api/v1/rooms/status", params={"ids": "room-1"}).status_code == 429
+
+
+# ====================== Rejoindre en spectateur avant que le salon soit plein ======================
+def test_spectate_flag_takes_no_seat_even_with_free_seats():
+    r = room(max_participants=3)
+    watcher, _ = r.join(Quiet().send, "w", spectate=True)
+    assert watcher.role == "spectator"
+    assert r.join(Quiet().send, "a")[0].role == "A"  # les sièges sont toujours libres pour les autres
+    assert r._presence()["seats"] == ["A"]
+
+
+def test_spectate_is_refused_when_spectators_are_not_allowed():
+    r = room(spectators_allowed=False)
+    with pytest.raises(SpectatorsNotAllowedError):
+        r.join(Quiet().send, "w", spectate=True)
+
+
+def test_spectate_respects_the_spectator_cap():
+    r = room(max_clients=1000)
+    for i in range(MAX_SPECTATORS):
+        r.join(Quiet().send, f"s{i}", spectate=True)
+    with pytest.raises(RoomFullError):
+        r.join(Quiet().send, "one-too-many", spectate=True)
+
+
+def test_spectate_does_not_strip_an_existing_seat():
+    r = room()
+    seated, _ = r.join(Quiet().send, "a")
+    again, replaced = r.join(Quiet().send, "a", spectate=True)
+    assert replaced is seated and again.role == "A"
+
+
+def test_spectator_can_never_post_even_alone_in_the_room():
+    import asyncio
+
+    r = room()
+    watcher, _ = r.join(Quiet().send, "w", spectate=True)
+    with pytest.raises(NotAllowedError):
+        asyncio.run(r.post_message(watcher, "Je tente de parler"))
+
+
+def test_ws_spectate_hello_over_the_wire():
+    with make_client() as c:
+        with c.websocket_connect("/api/v1/rooms/room-1/ws") as ws:
+            ws.send_json({"type": "hello", "token": token(901), "spectate": True})
+            assert recv_until(ws, "snapshot")["role"] == "spectator"
+        with connect(c, "room-1", 902) as ws:  # un autre arrive ensuite : il obtient bien le siège A
+            assert recv_until(ws, "snapshot")["role"] == "A"
+
+
+def test_ws_spectate_must_be_a_boolean():
+    with make_client() as c:
+        with c.websocket_connect("/api/v1/rooms/room-1/ws") as ws:
+            ws.send_json({"type": "hello", "token": token(903), "spectate": "yes"})
+            assert recv_error(ws)["code"] == "invalid_hello"

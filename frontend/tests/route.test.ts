@@ -45,3 +45,19 @@ describe('lien d’invitation', () => {
     expect(inviteUrl('abcd2345', 'k7m2xq')).toMatch(/#\/arena\/abcd2345\?code=k7m2xq$/)
   })
 })
+
+describe('mode spectateur (?watch=1)', () => {
+  it('lit watch, avec ou sans code', () => {
+    expect(parseHash('#/arena/abcd2345?watch=1')).toEqual({ name: 'room', id: 'abcd2345', watch: true })
+    expect(parseHash('#/arena/abcd2345?code=k7m2xq&watch=1')).toEqual({ name: 'room', id: 'abcd2345', code: 'k7m2xq', watch: true })
+  })
+  it('toute autre valeur est ignorée', () => {
+    expect(parseHash('#/arena/abcd2345?watch=0')).toEqual({ name: 'room', id: 'abcd2345' })
+    expect(parseHash('#/arena/abcd2345?watch=<x>')).toEqual({ name: 'room', id: 'abcd2345' })
+  })
+  it('roomHref construit le lien spectateur', async () => {
+    const { roomHref } = await import('../src/lib/route')
+    expect(roomHref('abcd2345', true)).toBe('#/arena/abcd2345?watch=1')
+    expect(roomHref('abcd2345')).toBe('#/arena/abcd2345')
+  })
+})

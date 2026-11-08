@@ -4,9 +4,10 @@ import { RoomView } from '../components/arena/RoomView'
 import { useRoomLookup } from '../hooks/useRoomLookup'
 import { historyCode, removeEntry } from '../lib/history'
 import { recallCode, rememberCode } from '../lib/identity'
+import { roomHref } from '../lib/route'
 
 /** Une room = une page (`#/arena/<id>`). On vérifie d'abord que le salon existe, puis on s'y connecte. */
-export function RoomPage({ id, inviteCode }: { id: string; inviteCode?: string }) {
+export function RoomPage({ id, inviteCode, watch = false }: { id: string; inviteCode?: string; watch?: boolean }) {
   const lookup = useRoomLookup(id)
   // Priorité : lien d'invitation, puis code de l'onglet, puis historique de cet appareil.
   const [code, setCode] = useState<string | undefined>(() => inviteCode ?? recallCode(id) ?? historyCode(id))
@@ -16,8 +17,8 @@ export function RoomPage({ id, inviteCode }: { id: string; inviteCode?: string }
   useEffect(() => {
     if (!inviteCode) return
     rememberCode(id, inviteCode)
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/arena/${id}`)
-  }, [id, inviteCode])
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${roomHref(id, watch)}`)
+  }, [id, inviteCode, watch])
 
   // Un salon expiré n'a plus sa place dans l'historique.
   useEffect(() => {
@@ -51,7 +52,8 @@ export function RoomPage({ id, inviteCode }: { id: string; inviteCode?: string }
 
   return (
     <RoomView
-      key={`${id}|${code ?? ''}|${attempt}`}
+      key={`${id}|${code ?? ''}|${watch}|${attempt}`}
+      spectate={watch}
       roomId={id}
       fallback={lookup.lookup.room ?? undefined}
       code={code}
