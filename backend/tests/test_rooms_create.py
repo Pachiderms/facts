@@ -381,7 +381,7 @@ def test_same_identity_in_two_tabs_replaces_the_first_and_keeps_one_seat():
                     first.receive_json()
                 assert exc.value.code == 4000
                 presence = recv_until(second, "presence")
-                assert presence["A"] is True and presence["B"] is False
+                assert presence["seats"] == ["A"]
 
 
 def test_two_different_identities_get_both_seats():

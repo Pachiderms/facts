@@ -1,6 +1,7 @@
 import { Plus, Search } from 'lucide-react'
 import { useId, useState } from 'react'
 import { CreateRoomForm } from '../components/arena/CreateRoomForm'
+import { MyRooms } from '../components/arena/MyRooms'
 import { RoomList } from '../components/arena/RoomList'
 import { useDebounced } from '../hooks/useDebounced'
 import { useRoomLookup } from '../hooks/useRoomLookup'
@@ -40,6 +41,8 @@ export function ArenaPage() {
       </div>
 
       {creating && <CreateRoomForm onCancel={() => setCreating(false)} />}
+
+      <MyRooms />
 
       <div className="relative">
         <label htmlFor={searchId} className="sr-only">

@@ -30,6 +30,10 @@ export interface RoomSummary {
   category: string
   theme_category: string
   visibility: 'public' | 'private'
+  max_participants: number
+  spectators_allowed: boolean
+  /** Dans le snapshot : vrai pour le créateur du salon (il peut le supprimer s'il est vide). */
+  is_owner?: boolean
   /** Présent uniquement dans le snapshot envoyé au PROPRIÉTAIRE d'un salon privé. */
   access_code?: string
   /** `null` tant qu'aucun message vérifiable n'a été évalué. */
@@ -53,6 +57,8 @@ export interface CreateRoomInput {
   title: string
   theme_category: string
   visibility: Visibility
+  max_participants: number
+  spectators_allowed: boolean
 }
 
 export interface CreatedRoom {
@@ -61,7 +67,12 @@ export interface CreatedRoom {
   access_code: string | null
 }
 
-export type Role = 'A' | 'B' | 'spectator'
+export const SEAT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const
+export type Seat = (typeof SEAT_LETTERS)[number]
+export type Role = Seat | 'spectator'
+export const isSeat = (value: unknown): value is Seat => SEAT_LETTERS.includes(value as Seat)
+export const PARTICIPANTS_MIN = 2
+export const PARTICIPANTS_MAX = 6
 export type BadgeType = 'green' | 'amber' | 'red' | 'gray'
 export type CheckStatus =
   | 'pending'
@@ -82,7 +93,7 @@ export interface MessageCheck {
 
 export interface RoomMessage {
   id: number
-  speaker: 'A' | 'B'
+  speaker: Seat
   speaker_name: string
   text: string
   /** ISO 8601, UTC. */
@@ -91,8 +102,9 @@ export interface RoomMessage {
 }
 
 export interface Presence {
-  A: boolean
-  B: boolean
+  /** Sièges occupés, dans l'ordre. */
+  seats: Seat[]
+  max_participants: number
   spectators: number
 }
 

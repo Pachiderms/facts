@@ -1,14 +1,28 @@
 import { ArrowLeft } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RoomView } from '../components/arena/RoomView'
 import { useRoomLookup } from '../hooks/useRoomLookup'
+import { historyCode, removeEntry } from '../lib/history'
 import { recallCode, rememberCode } from '../lib/identity'
 
 /** Une room = une page (`#/arena/<id>`). On vérifie d'abord que le salon existe, puis on s'y connecte. */
-export function RoomPage({ id }: { id: string }) {
+export function RoomPage({ id, inviteCode }: { id: string; inviteCode?: string }) {
   const lookup = useRoomLookup(id)
-  const [code, setCode] = useState<string | undefined>(() => recallCode(id))
+  // Priorité : lien d'invitation, puis code de l'onglet, puis historique de cet appareil.
+  const [code, setCode] = useState<string | undefined>(() => inviteCode ?? recallCode(id) ?? historyCode(id))
   const [attempt, setAttempt] = useState(0)
+
+  // Le code d'un lien d'invitation est retiré de la barre d'adresse (historique, captures d'écran).
+  useEffect(() => {
+    if (!inviteCode) return
+    rememberCode(id, inviteCode)
+    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/arena/${id}`)
+  }, [id, inviteCode])
+
+  // Un salon expiré n'a plus sa place dans l'historique.
+  useEffect(() => {
+    if (lookup.status === 'missing') removeEntry(id)
+  }, [lookup.status, id])
 
   if (lookup.status === 'idle' || lookup.status === 'loading') {
     return (

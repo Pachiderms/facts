@@ -21,7 +21,7 @@ export function Composer({ role, status, onSend }: Props) {
   const [failed, setFailed] = useState(false)
   const fieldId = useId()
 
-  const isSpeaker = role === 'A' || role === 'B'
+  const isSpeaker = role !== null && role !== 'spectator'
   const connected = status === 'open'
   const trimmed = text.trim()
   const canSend = isSpeaker && connected && trimmed.length > 0
@@ -59,7 +59,7 @@ export function Composer({ role, status, onSend }: Props) {
 
       {role === 'spectator' ? (
         <p className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-xs text-neutral-600">
-          Les deux places d’intervenant sont prises : vous suivez le débat en spectateur. Revenez plus tard ou choisissez un autre salon.
+          Toutes les places d’intervenant sont prises : vous suivez le débat en spectateur. Revenez plus tard ou choisissez un autre salon.
         </p>
       ) : (
         <form onSubmit={send} className="space-y-3">

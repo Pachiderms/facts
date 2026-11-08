@@ -1,5 +1,5 @@
 import type { SocketStatus } from '../api/socket'
-import type { MessageCheck, Presence, Role, RoomMessage, RoomSummary, ServerEvent } from '../api/types'
+import { isSeat, type MessageCheck, type Presence, type Role, type RoomMessage, type RoomSummary, type ServerEvent } from '../api/types'
 
 /** Plafond local : le serveur borne déjà l'historique, on borne aussi l'affichage. */
 export const MAX_MESSAGES = 500
@@ -19,8 +19,8 @@ export interface RoomState {
   denied: DeniedReason | null
 }
 
-export type DeniedReason = 'invalid_code' | 'too_many_attempts' | 'session_replaced'
-const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 'session_replaced']
+export type DeniedReason = 'invalid_code' | 'too_many_attempts' | 'session_replaced' | 'spectators_not_allowed' | 'room_deleted'
+const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 'session_replaced', 'spectators_not_allowed', 'room_deleted']
 
 export const initialRoomState: RoomState = {
   status: 'connecting',
@@ -66,7 +66,14 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
             deltas: {},
           }
         case 'presence':
-          return { ...state, presence: { A: event.A, B: event.B, spectators: event.spectators } }
+          return {
+            ...state,
+            presence: {
+              seats: Array.isArray(event.seats) ? event.seats.filter(isSeat) : [],
+              max_participants: event.max_participants,
+              spectators: event.spectators,
+            },
+          }
         case 'message': {
           if (state.messages.some((m) => m.id === event.message.id)) return state
           return {

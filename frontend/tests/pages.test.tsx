@@ -145,6 +145,8 @@ const room = (over: Partial<RoomSummary> = {}): RoomSummary => ({
   trust_score: null,
   message_count: 0,
   participants: 1,
+  max_participants: 2,
+  spectators_allowed: true,
   spectators: 0,
   ...over,
 })
@@ -472,11 +474,11 @@ describe('RoomPage (une room = une page)', () => {
 
   it('affiche le rôle attribué par le serveur, le statut et la présence', () => {
     hooks.useRoomLookup.mockReturnValue(found())
-    hooks.useRoom.mockReturnValue(roomState({ role: 'B', presence: { A: true, B: true, spectators: 2 } }))
+    hooks.useRoom.mockReturnValue(roomState({ role: 'B', presence: { seats: ['A', 'B'], max_participants: 2, spectators: 2 } }))
     render(<RoomPage id="room-1" />)
     expect(screen.getByText('Vous êtes Participant B')).toBeInTheDocument()
     expect(screen.getByText('En direct')).toBeInTheDocument()
-    expect(screen.getByText(/A présent · B présent · 2 spectateurs/)).toBeInTheDocument()
+    expect(screen.getByText(/Intervenants : 2\/2 \(A, B\) · 2 spectateurs/)).toBeInTheDocument()
   })
 
   it('la zone de saisie est dans la page du salon (intervenant) et absente pour un spectateur', () => {

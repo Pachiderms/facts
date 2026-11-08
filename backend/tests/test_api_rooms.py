@@ -75,7 +75,7 @@ def test_list_rooms():
         rooms = c.get("/api/v1/rooms").json()
     assert [r["id"] for r in rooms] == ["room-1", "room-2", "room-3"]
     assert rooms[0]["trust_score"] is None and rooms[0]["message_count"] == 0  # pas d'historique fabriqué
-    assert set(rooms[0]) == {"id", "title", "category", "theme_category", "visibility", "trust_score", "message_count", "participants", "spectators"}
+    assert set(rooms[0]) == {"id", "title", "category", "theme_category", "visibility", "max_participants", "spectators_allowed", "trust_score", "message_count", "participants", "spectators"}
 
 
 def test_list_rooms_is_rate_limited():
@@ -149,9 +149,9 @@ def test_presence_updates_when_someone_joins():
         recv_until(a, "snapshot")
         with connect(c):
             presence = recv_until(a, "presence")
-            while not presence["B"]:
+            while "B" not in presence["seats"]:
                 presence = recv_until(a, "presence")
-            assert presence["A"] and presence["B"]
+            assert presence["seats"] == ["A", "B"] and presence["max_participants"] == 2
 
 
 # ---------- Autorisation ----------

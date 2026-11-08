@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiBase, checkAssertion, createRoom, isCheckResponse, listRooms, lookupRoom, wsBase } from '../src/api/client'
+import { ApiError, apiBase, checkAssertion, createRoom, deleteRoom, isCheckResponse, listRooms, lookupRoom, roomsStatus, wsBase } from '../src/api/client'
 import type { CheckResponse } from '../src/api/types'
 
 const OK: CheckResponse = {
@@ -115,6 +115,8 @@ const ROOM = {
   trust_score: null,
   message_count: 0,
   participants: 0,
+  max_participants: 2,
+  spectators_allowed: true,
   spectators: 0,
 }
 
@@ -178,7 +180,7 @@ describe('lookupRoom', () => {
 })
 
 describe('createRoom', () => {
-  const INPUT = { title: 'Faut-il un revenu universel ?', theme_category: 'social', visibility: 'private' as const }
+  const INPUT = { title: 'Faut-il un revenu universel ?', theme_category: 'social', visibility: 'private' as const, max_participants: 4, spectators_allowed: false }
 
   beforeEach(() => localStorage.clear())
 
@@ -212,5 +214,38 @@ describe('createRoom', () => {
   it('rejette une réponse hors contrat', async () => {
     fetchMock.mockResolvedValue(json({ id: 42 }, { status: 201 }))
     await expect(createRoom(INPUT)).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('roomsStatus', () => {
+  it('une seule requête, sans appel si l’historique est vide', async () => {
+    expect(await roomsStatus([])).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
+    fetchMock.mockResolvedValue(json({ existing: ['aaaa2222'] }))
+    expect(await roomsStatus(['aaaa2222', 'bbbb2222'])).toEqual(['aaaa2222'])
+    expect(fetchMock.mock.calls[0]![0]).toContain('ids=aaaa2222%2Cbbbb2222')
+  })
+
+  it('rejette une réponse hors contrat', async () => {
+    fetchMock.mockResolvedValue(json({ existing: [1] }))
+    await expect(roomsStatus(['aaaa2222'])).rejects.toMatchObject({ status: 502 })
+  })
+})
+
+describe('deleteRoom', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('POST avec le jeton dans le corps (jamais dans l’URL)', async () => {
+    fetchMock.mockResolvedValue(json({ ok: true }))
+    await deleteRoom('aaaa2222')
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toMatch(/\/rooms\/aaaa2222\/delete$/)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ participant_token: localStorage.getItem('facts.participant') })
+  })
+
+  it('propage le refus du serveur', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Salon non vide.' }, { status: 409 }))
+    await expect(deleteRoom('aaaa2222')).rejects.toMatchObject({ status: 409 })
   })
 })

@@ -28,7 +28,7 @@ export default function App() {
       <Page>
         {route.name === 'check' && <CheckPage />}
         {route.name === 'arena' && <ArenaPage />}
-        {route.name === 'room' && <RoomPage key={route.id} id={route.id} />}
+        {route.name === 'room' && <RoomPage key={route.id} id={route.id} inviteCode={route.code} />}
       </Page>
       <Footer />
     </div>
