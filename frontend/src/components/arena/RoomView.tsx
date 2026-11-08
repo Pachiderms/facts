@@ -1,11 +1,14 @@
-import { ArrowLeft, Lock, X } from 'lucide-react'
+import { ArrowLeft, Lock, UserX, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { SocketStatus } from '../../api/socket'
-import type { RoomSummary } from '../../api/types'
+import { isSeat, type RoomSummary } from '../../api/types'
 import { useRoom } from '../../hooks/useRoom'
+import { recordVisit, removeEntry } from '../../lib/history'
 import { forgetCode } from '../../lib/identity'
-import { CopyChip } from '../CopyChip'
+import { inviteUrl } from '../../lib/route'
+import { CopyChip, CopyLinkButton } from '../CopyChip'
 import { AccessCodeForm } from './AccessCodeForm'
+import { DeleteRoomButton } from './DeleteRoomButton'
 import { Composer } from './Composer'
 import { MessageCard } from './MessageCard'
 import { TrustMeter } from './TrustMeter'
@@ -44,6 +47,18 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Pro
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
   }, [messages])
 
+  // « Mes salons » : on retient ce salon (et son code, sur cet appareil) dès qu'on y est entré.
+  useEffect(() => {
+    if (!room) return
+    recordVisit({
+      id: roomId,
+      title: room.title,
+      visibility: room.visibility,
+      code: room.access_code ?? code,
+      owner: room.is_owner === true,
+    })
+  }, [room, roomId, code])
+
   // Un code refusé ne doit pas être resservi au prochain rechargement.
   useEffect(() => {
     if (denied === 'invalid_code') forgetCode(roomId)
@@ -72,7 +87,27 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Pro
     )
   }
 
+  if (denied === 'spectators_not_allowed' || denied === 'room_deleted') {
+    return (
+      <div role="alert" className="mx-auto max-w-md space-y-3 rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-700 shadow-sm">
+        <p className="flex items-center justify-center gap-2 font-bold text-neutral-900">
+          <UserX className="h-4 w-4" aria-hidden="true" />
+          {denied === 'room_deleted' ? 'Salon supprimé' : 'Salon complet'}
+        </p>
+        <p>
+          {denied === 'room_deleted'
+            ? 'Ce salon a été supprimé par son créateur.'
+            : 'Toutes les places d’intervenant sont prises et ce salon n’admet pas de spectateurs.'}
+        </p>
+        <a href="#/arena" className="inline-block text-xs font-bold text-neutral-900 underline-offset-2 hover:underline">
+          Retour aux salons
+        </a>
+      </div>
+    )
+  }
+
   const live = STATUS_LABEL[status]
+  const shareCode = room?.access_code ?? code
 
   return (
     <div className="space-y-6">
@@ -94,8 +129,23 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Pro
                   <Lock className="h-3 w-3" aria-hidden="true" /> Salon privé
                 </span>
               )}
+              {info?.spectators_allowed === false && (
+                <span className="rounded-lg border border-neutral-200 bg-neutral-100 px-2 py-1 text-[11px] font-bold text-neutral-700">Sans spectateurs</span>
+              )}
               <CopyChip label="ID" value={roomId} />
               {info?.access_code && <CopyChip label="Code d’accès" value={info.access_code} />}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <CopyLinkButton url={inviteUrl(roomId, info?.visibility === 'private' ? shareCode : undefined)} />
+              {room?.is_owner && (
+                <DeleteRoomButton
+                  roomId={roomId}
+                  onDeleted={() => {
+                    removeEntry(roomId)
+                    window.location.hash = '#/arena'
+                  }}
+                />
+              )}
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-start gap-1.5 md:items-end">
@@ -105,7 +155,8 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Pro
             </span>
             {presence && (
               <span className="text-[11px] text-neutral-500">
-                Intervenants : A {presence.A ? 'présent' : 'absent'} · B {presence.B ? 'présent' : 'absent'}
+                Intervenants : {presence.seats.length}/{presence.max_participants}
+                {presence.seats.length > 0 && ` (${presence.seats.join(', ')})`}
                 {presence.spectators > 0 && ` · ${presence.spectators} spectateur${presence.spectators > 1 ? 's' : ''}`}
               </span>
             )}
@@ -140,10 +191,10 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Pro
       >
         {messages.length === 0 ? (
           <li className="rounded-xl border border-dashed border-neutral-300 bg-white p-8 text-center text-xs text-neutral-500">
-            Aucun message pour l’instant. {role === 'A' || role === 'B' ? 'Lancez le débat !' : 'Le débat va bientôt commencer.'}
+            Aucun message pour l’instant. {isSeat(role) ? 'Lancez le débat !' : 'Le débat va bientôt commencer.'}
           </li>
         ) : (
-          messages.map((m) => <MessageCard key={m.id} message={m} delta={deltas[m.id]} />)
+          messages.map((m) => <MessageCard key={m.id} message={m} delta={deltas[m.id]} alternate={(info?.max_participants ?? 2) === 2} />)
         )}
       </ul>
 

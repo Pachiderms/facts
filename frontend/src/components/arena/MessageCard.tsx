@@ -17,13 +17,14 @@ function BadgeIcon({ message }: { message: RoomMessage }) {
   }
 }
 
-export function MessageCard({ message, delta }: { message: RoomMessage; delta?: number }) {
+/** `alternate` : débat à deux, les messages se répondent de part et d'autre ; au-delà, tout est aligné. */
+export function MessageCard({ message, delta, alternate = true }: { message: RoomMessage; delta?: number; alternate?: boolean }) {
   const isA = message.speaker === 'A'
   const tone = badgeTone(message.check.badge_type)
   const pending = message.check.status === 'pending'
 
   return (
-    <li className={`space-y-2.5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ${isA ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}>
+    <li className={`space-y-2.5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ${!alternate ? '' : isA ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}>
       <div className="flex items-center justify-between border-b border-neutral-100 pb-2 text-xs">
         <div className="flex items-center space-x-2">
           <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-bold text-neutral-800">

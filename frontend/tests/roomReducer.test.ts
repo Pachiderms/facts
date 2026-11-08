@@ -24,6 +24,8 @@ const room = (over: Partial<RoomSummary> = {}): RoomSummary => ({
   trust_score: null,
   message_count: 0,
   participants: 1,
+  max_participants: 2,
+  spectators_allowed: true,
   spectators: 0,
   ...over,
 })
@@ -76,8 +78,8 @@ describe('roomReducer', () => {
   })
 
   it('presence : stockée telle quelle', () => {
-    const s = apply(initialRoomState, { type: 'presence', A: true, B: false, spectators: 3 })
-    expect(s.presence).toEqual({ A: true, B: false, spectators: 3 })
+    const s = apply(initialRoomState, { type: 'presence', seats: ['A'], max_participants: 4, spectators: 3 })
+    expect(s.presence).toEqual({ seats: ['A'], max_participants: 4, spectators: 3 })
   })
 
   it('error : affiche le message serveur ; dismiss l’efface ; texte vide -> message par défaut', () => {

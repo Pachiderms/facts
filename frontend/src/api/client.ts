@@ -133,6 +133,8 @@ export function isRoomSummary(v: unknown): v is RoomSummary {
     typeof v.category === 'string' &&
     typeof v.theme_category === 'string' &&
     isVisibility(v.visibility) &&
+    typeof v.max_participants === 'number' &&
+    typeof v.spectators_allowed === 'boolean' &&
     (v.trust_score === null || typeof v.trust_score === 'number') &&
     typeof v.message_count === 'number' &&
     typeof v.participants === 'number' &&
@@ -191,6 +193,31 @@ export async function createRoom(input: CreateRoomInput, signal?: AbortSignal): 
     throw BAD_RESPONSE()
   }
   return data as unknown as CreatedRoom
+}
+
+/** Parmi ces salons (historique), lesquels existent encore ? Une seule requête pour toute la liste. */
+export async function roomsStatus(ids: string[], signal?: AbortSignal): Promise<string[]> {
+  if (ids.length === 0) return []
+  const response = await request(`/api/v1/rooms/status?ids=${encodeURIComponent(ids.join(','))}`, { signal }, 20_000)
+  if (!response.ok) throw await toApiError(response)
+  const data: unknown = await response.json().catch(() => null)
+  if (!isRecord(data) || !Array.isArray(data.existing) || !data.existing.every((i) => typeof i === 'string')) throw BAD_RESPONSE()
+  return data.existing as string[]
+}
+
+/** Suppression par le créateur (le serveur refuse si d'autres personnes sont connectées). */
+export async function deleteRoom(id: string, signal?: AbortSignal): Promise<void> {
+  const response = await request(
+    `/api/v1/rooms/${encodeURIComponent(id)}/delete`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participant_token: getParticipantToken() }),
+      signal,
+    },
+    20_000,
+  )
+  if (!response.ok) throw await toApiError(response)
 }
 
 /** Réveille un hébergeur gratuit en veille dès l'ouverture de l'application (réponse ignorée). */

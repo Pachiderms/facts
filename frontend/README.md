@@ -39,3 +39,9 @@ Le build génère `dist/_headers` (CSP stricte, `connect-src` limité à l'URL d
 Cloudflare Pages : racine `frontend`, commande `npm run build`, sortie `dist`, variable `VITE_API_URL` = URL publique du backend. Côté backend, ajouter l'URL du site dans `FACTS_CORS_ORIGINS`.
 
 > Sur un hébergeur gratuit qui s'endort, la première requête réveille le serveur (appel `/health` au chargement).
+
+## Salons : historique et invitation
+
+- « Mes salons » : historique local (20 entrées, épinglage, statut « Expiré » via `GET /rooms/status`). Le code d'un salon privé y est gardé **sur cet appareil uniquement**, pour revenir sans le redemander.
+- Lien d'invitation `#/arena/<id>?code=<code>` : le code est lu puis retiré de la barre d'adresse.
+- Le créateur d'un salon vide peut le supprimer (confirmation en deux temps).

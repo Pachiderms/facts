@@ -29,3 +29,19 @@ describe('parseHash', () => {
     expect(parseHash(roomHref('abcd2345'))).toEqual({ name: 'room', id: 'abcd2345' })
   })
 })
+
+describe('lien d’invitation', () => {
+  it('lit le code d’un salon privé depuis ?code=', () => {
+    expect(parseHash('#/arena/abcd2345?code=k7m2xq')).toEqual({ name: 'room', id: 'abcd2345', code: 'k7m2xq' })
+  })
+
+  it('ignore un code hostile', () => {
+    expect(parseHash('#/arena/abcd2345?code=<script>')).toEqual({ name: 'room', id: 'abcd2345' })
+  })
+
+  it('inviteUrl contient le code uniquement s’il est fourni', async () => {
+    const { inviteUrl } = await import('../src/lib/route')
+    expect(inviteUrl('abcd2345')).toMatch(/#\/arena\/abcd2345$/)
+    expect(inviteUrl('abcd2345', 'k7m2xq')).toMatch(/#\/arena\/abcd2345\?code=k7m2xq$/)
+  })
+})

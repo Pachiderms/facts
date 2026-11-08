@@ -1,7 +1,8 @@
 import { Globe, Lock } from 'lucide-react'
 import { useId, useRef, useState, type FormEvent } from 'react'
 import { createRoom } from '../../api/client'
-import { ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
+import { PARTICIPANTS_MAX, PARTICIPANTS_MIN, ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
+import { recordVisit } from '../../lib/history'
 import { rememberCode } from '../../lib/identity'
 import { CREATABLE_THEMES, themeBadge } from '../../lib/presentation'
 import { roomHref } from '../../lib/route'
@@ -10,10 +11,12 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
   const [title, setTitle] = useState('')
   const [theme, setTheme] = useState<string>(CREATABLE_THEMES[0])
   const [visibility, setVisibility] = useState<Visibility>('public')
+  const [maxParticipants, setMaxParticipants] = useState(PARTICIPANTS_MIN)
+  const [spectators, setSpectators] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inFlight = useRef(false)
-  const ids = { title: useId(), theme: useId() }
+  const ids = { title: useId(), theme: useId(), seats: useId() }
 
   const trimmed = title.trim()
   const tooShort = trimmed.length < ROOM_TITLE_MIN
@@ -26,7 +29,15 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
     setBusy(true)
     setError(null)
     try {
-      const created = await createRoom({ title: trimmed, theme_category: theme, visibility })
+      const created = await createRoom({
+        title: trimmed,
+        theme_category: theme,
+        visibility,
+        max_participants: maxParticipants,
+        spectators_allowed: spectators,
+      })
+      // Dès la création, le salon entre dans « Mes salons » : on le retrouve même si on quitte la page.
+      recordVisit({ id: created.id, title: trimmed, visibility: created.visibility, code: created.access_code ?? undefined, owner: true })
       // Le propriétaire entre sans code (le serveur le reconnaît) ; on garde le code pour un rechargement.
       if (created.access_code) rememberCode(created.id, created.access_code)
       window.location.hash = roomHref(created.id)
@@ -110,6 +121,33 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
           ))}
         </div>
       </fieldset>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <label htmlFor={ids.seats} className="text-xs font-bold text-neutral-800">
+            Intervenants maximum
+          </label>
+          <select
+            id={ids.seats}
+            value={maxParticipants}
+            onChange={(e) => setMaxParticipants(Number(e.target.value))}
+            className="w-full rounded-xl border border-neutral-300 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900"
+          >
+            {Array.from({ length: PARTICIPANTS_MAX - PARTICIPANTS_MIN + 1 }, (_, i) => PARTICIPANTS_MIN + i).map((n) => (
+              <option key={n} value={n}>
+                {n} intervenants
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="flex cursor-pointer items-start gap-3 self-end rounded-xl border border-neutral-200 p-3 text-xs hover:border-neutral-300">
+          <input type="checkbox" checked={spectators} onChange={(e) => setSpectators(e.target.checked)} className="mt-0.5 accent-neutral-900" />
+          <span>
+            <span className="block font-bold text-neutral-900">Autoriser les spectateurs</span>
+            <span className="text-neutral-500">Jusqu’à 20 personnes qui suivent sans intervenir.</span>
+          </span>
+        </label>
+      </div>
 
       {error && (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-900">
