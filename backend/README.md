@@ -65,7 +65,7 @@ Règle de dépendance : `api -> services -> adapters/core`. Recherche et LLM son
 - `GET /api/v1/rooms/status?ids=a,b` : parmi ces ID (historique du navigateur), lesquels existent encore -> `{existing: [...]}`. Ne révèle ni titre ni code.
 - `POST /api/v1/rooms/{id}/delete` : `{participant_token}`. Réservé au créateur et seulement si le salon est vide (POST car CORS n'autorise que GET/POST).
 - `WS /api/v1/rooms/{id}/ws` : salon en direct.
-  - client -> serveur : **premier message obligatoire** `{"type": "hello", "token": "<jeton>", "code": "<code si privé>"}`, puis `{"type": "message", "text": "..."}`.
+  - client -> serveur : **premier message obligatoire** `{"type": "hello", "token": "<jeton>", "code": "<code si privé>", "spectate": true|false}` (`spectate` : regarder sans prendre de siège, même s'il en reste ; refusé si le salon n'admet pas de spectateurs), puis `{"type": "message", "text": "..."}`.
   - serveur -> client : `snapshot` (rôle attribué + historique), `presence` (`{seats: ["A",…], max_participants, spectators}`), `message` (état `pending`), `check_result` (badge, sources, `trust_score`, `trust_delta`), `error` (`invalid_hello`, `invalid_code`, `too_many_attempts`, `session_replaced`, `spectators_not_allowed`, `room_full`, `room_deleted`, ...).
 
 ### Identité anonyme et salons créés par les utilisateurs

@@ -11,7 +11,7 @@ import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
 
 from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
 from app.core.config import Settings
@@ -66,6 +66,8 @@ class HelloEvent(BaseModel):
     type: Literal["hello"]
     token: str
     code: str | None = Field(default=None, max_length=16)
+    # Rejoindre en spectateur même s'il reste des places d'intervenant.
+    spectate: StrictBool = False
 
     @field_validator("token")
     @classmethod
@@ -262,7 +264,7 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
                 return
 
         try:
-            client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED))
+            client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED), spectate=hello.spectate)
         except SpectatorsNotAllowedError as exc:
             await _reject(ws, "spectators_not_allowed", str(exc))
             return

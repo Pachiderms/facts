@@ -28,11 +28,13 @@ interface Props {
   onSubmitCode: (code: string) => void
   /** Reprendre la place dans CET onglet (après ouverture dans un autre). */
   onRetake: () => void
+  /** Entrer en spectateur sans prendre de siège d'intervenant. */
+  spectate?: boolean
 }
 
 /** Un salon. Monté avec une `key` : changer de salon ou de code ferme proprement l'ancienne connexion. */
-export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake }: Props) {
-  const { status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice } = useRoom(roomId, code)
+export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spectate = false }: Props) {
+  const { status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice } = useRoom(roomId, code, spectate)
   const info = room ?? fallback
   const listRef = useRef<HTMLUListElement>(null)
   const stickToBottom = useRef(true)
