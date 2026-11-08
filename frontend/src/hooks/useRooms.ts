@@ -5,8 +5,8 @@ import type { RoomSummary } from '../api/types'
 const REFRESH_MS = 15_000
 const MAX_BACKOFF_MS = 120_000
 
-/** Liste des salons, rafraîchie périodiquement (le score évolue pendant les débats). */
-export function useRooms() {
+/** Salons publics (filtrés par `query`), rafraîchis périodiquement : le score évolue pendant les débats. */
+export function useRooms(query = '') {
   const [rooms, setRooms] = useState<RoomSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -17,7 +17,7 @@ export function useRooms() {
 
     const load = async () => {
       try {
-        const data = await listRooms(controller.signal)
+        const data = await listRooms(query, controller.signal)
         setRooms(data)
         setError(null)
         failures = 0
@@ -44,7 +44,7 @@ export function useRooms() {
       controller.abort()
       clearTimeout(timer)
     }
-  }, [])
+  }, [query])
 
   return { rooms, error }
 }

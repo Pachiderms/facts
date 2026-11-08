@@ -93,6 +93,8 @@ def create_app(
     app.state.ws_limiter = SlidingWindowRateLimiter(settings.ws_messages_per_minute, 60)
     app.state.daily_check_limiter = SlidingWindowRateLimiter(settings.daily_check_limit, 86_400)
     app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
+    app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
+    app.state.code_limiter = SlidingWindowRateLimiter(settings.room_code_max_failures, settings.room_code_window_seconds)
 
     app.add_middleware(
         CORSMiddleware,

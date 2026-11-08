@@ -9,9 +9,11 @@ import asyncio
 import copy
 import logging
 import secrets
+import time
+import unicodedata
 from collections import Counter, deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -39,11 +41,27 @@ class NotAllowedError(RoomError):
     pass
 
 
+class TooManyRoomsError(RoomError):
+    pass
+
+
+THEMES: dict[str, str] = {  # theme_category -> libellé par défaut de la catégorie
+    "social": "Économie & Emploi",
+    "souverain": "Énergie & Souveraineté",
+    "ecologie": "Transition écologique",
+    "techno": "Institutions & droit",
+}
+ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # sans caractères ambigus (i, l, o, 0, 1)
+ID_LENGTH, CODE_LENGTH = 8, 6
+
+
 @dataclass
 class Client:
     id: str
     role: str  # "A", "B" ou "spectator" : attribué par le SERVEUR, jamais choisi par le client
     send: SendFn
+    participant_id: str = ""
+    close: Callable[[], Awaitable[None]] | None = field(default=None, repr=False)
 
 
 class CheckLimits:
@@ -68,8 +86,16 @@ class Room:
         max_message_chars: int = 500,
         max_clients: int = 100,
         checkable: Callable[[str], bool] = is_checkable,
+        visibility: str = "public",
+        access_code: str | None = None,
+        owner_id: str | None = None,
+        permanent: bool = False,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.id, self.title, self.category, self.theme_category = room_id, title, category, theme_category
+        self.visibility, self._access_code, self.owner_id, self.permanent = visibility, access_code, owner_id, permanent
+        self._clock = clock
+        self.last_activity = clock()
         self._checker, self._limits = checker, limits
         self._max_chars, self._max_clients = max_message_chars, max_clients
         self._checkable = checkable
@@ -101,33 +127,70 @@ class Room:
             "title": self.title,
             "category": self.category,
             "theme_category": self.theme_category,
+            "visibility": self.visibility,
             "trust_score": self.trust_score,
             "message_count": self.total_messages,
             "participants": sum(1 for r in roles if r in ("A", "B")),
             "spectators": sum(1 for r in roles if r == "spectator"),
         }
 
-    def snapshot(self, role: str) -> dict[str, Any]:
-        return {
-            "type": "snapshot",
-            "role": role,
-            "room": self.summary(),
-            "messages": copy.deepcopy(list(self.messages)),
-        }
+    def snapshot(self, role: str, participant: str = "") -> dict[str, Any]:
+        room = self.summary()
+        if self.is_owner(participant) and self._access_code:
+            room["access_code"] = self._access_code  # visible du seul propriétaire, pour le partager
+        return {"type": "snapshot", "role": role, "room": room, "messages": copy.deepcopy(list(self.messages))}
+
+    # ---------- accès ----------
+    def is_owner(self, participant: str) -> bool:
+        return bool(participant) and self.owner_id is not None and secrets.compare_digest(participant, self.owner_id)
+
+    def requires_code(self) -> bool:
+        return self.visibility == "private"
+
+    def check_code(self, code: str | None) -> bool:
+        """Comparaison à temps constant ; insensible à la casse et aux espaces."""
+        if not self.requires_code():
+            return True
+        if not code or self._access_code is None:
+            return False
+        return secrets.compare_digest(code.strip().lower().encode(), self._access_code.encode())
+
+    @property
+    def access_code(self) -> str | None:
+        return self._access_code
+
+    @property
+    def idle_seconds(self) -> float:
+        return self._clock() - self.last_activity
 
     # ---------- connexions ----------
-    def join(self, send: SendFn) -> Client:
-        """Synchrone et sans `await` : l'attribution des rôles est atomique (pas de course)."""
-        if len(self.clients) >= self._max_clients:
+    def join(
+        self, send: SendFn, participant_id: str | None = None, close: Callable[[], Awaitable[None]] | None = None
+    ) -> tuple[Client, Client | None]:
+        """Synchrone et sans `await` : l'attribution des rôles est atomique (pas de course).
+
+        Une même personne ne tient jamais deux sièges : si son identité est déjà connectée dans ce
+        salon (autre onglet, reconnexion avant que l'ancienne socket ne soit détectée morte), la
+        nouvelle connexion REMPLACE l'ancienne et hérite de son rôle. Renvoie (client, remplacé).
+        """
+        pid = participant_id or secrets.token_hex(8)
+        replaced = next((c for c in self.clients.values() if c.participant_id == pid), None)
+        if replaced is None and len(self.clients) >= self._max_clients:
             raise RoomFullError("Salon complet.")
-        taken = {c.role for c in self.clients.values()}
-        role = "A" if "A" not in taken else "B" if "B" not in taken else "spectator"
-        client = Client(id=secrets.token_hex(8), role=role, send=send)
+        if replaced is not None:
+            del self.clients[replaced.id]
+            role = replaced.role
+        else:
+            taken = {c.role for c in self.clients.values()}
+            role = "A" if "A" not in taken else "B" if "B" not in taken else "spectator"
+        client = Client(id=secrets.token_hex(8), role=role, send=send, participant_id=pid, close=close)
         self.clients[client.id] = client
-        return client
+        self.last_activity = self._clock()
+        return client, replaced
 
     async def leave(self, client_id: str) -> None:
         if self.clients.pop(client_id, None) is not None:
+            self.last_activity = self._clock()
             await self.broadcast(self._presence())
 
     async def broadcast_presence(self) -> None:
@@ -153,6 +216,7 @@ class Room:
         if client.role not in ("A", "B"):
             raise NotAllowedError("Les spectateurs ne peuvent pas intervenir.")
         clean = sanitize_text(text, self._max_chars)  # lève InvalidInputError si vide / trop long
+        self.last_activity = self._clock()
 
         needs_check = self._checkable(clean)
         self._next_id += 1
@@ -218,15 +282,71 @@ SEED_ROOMS = [
 ]
 
 
+def _fold(text: str) -> str:
+    """Minuscules sans accents : « Électricité » doit correspondre à « electricite »."""
+    return "".join(c for c in unicodedata.normalize("NFD", text.casefold()) if unicodedata.category(c) != "Mn")
+
+
 class RoomRegistry:
-    def __init__(self, rooms: list[Room]) -> None:
+    def __init__(
+        self,
+        rooms: list[Room],
+        *,
+        factory: Callable[..., Room] | None = None,
+        max_rooms: int = 50,
+        idle_ttl_seconds: float = 1_800,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._rooms = {r.id: r for r in rooms}
+        self._factory, self._max_rooms, self._idle_ttl, self._clock = factory, max_rooms, idle_ttl_seconds, clock
 
     def get(self, room_id: str) -> Room | None:
         return self._rooms.get(room_id)
 
-    def summaries(self) -> list[dict[str, Any]]:
-        return [r.summary() for r in self._rooms.values()]
+    def __len__(self) -> int:
+        return len(self._rooms)
+
+    def summaries(self, query: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """Salons PUBLICS uniquement (un salon privé ne se découvre jamais par la liste ni la recherche)."""
+        needle = _fold(query.strip()) if query else ""
+        rooms = [r for r in self._rooms.values() if r.visibility == "public"]
+        if needle:
+            rooms = [r for r in rooms if needle in _fold(r.title) or needle in _fold(r.category) or needle == r.id]
+        # Salons par défaut d'abord, puis les plus récemment actifs.
+        rooms.sort(key=lambda r: (not r.permanent, 0.0 if r.permanent else -r.last_activity))  # tri stable
+        return [r.summary() for r in rooms[:limit]]
+
+    async def purge_idle(self) -> int:
+        """Supprime les salons non permanents, vides, inactifs depuis trop longtemps."""
+        stale = [
+            r for r in self._rooms.values()
+            if not r.permanent and not r.clients and r.idle_seconds >= self._idle_ttl
+        ]
+        for room in stale:
+            del self._rooms[room.id]
+        await asyncio.gather(*(r.aclose() for r in stale))
+        return len(stale)
+
+    async def create(self, *, title: str, theme_category: str, visibility: str, owner_id: str) -> Room:
+        if self._factory is None:
+            raise RuntimeError("Création de salons non configurée.")
+        await self.purge_idle()
+        if len(self._rooms) >= self._max_rooms:
+            raise TooManyRoomsError("Le nombre maximal de salons est atteint. Réessayez plus tard.")
+        room_id = self._new_id()
+        code = "".join(secrets.choice(ID_ALPHABET) for _ in range(CODE_LENGTH)) if visibility == "private" else None
+        room = self._factory(
+            room_id=room_id, title=title, category=THEMES[theme_category], theme_category=theme_category,
+            visibility=visibility, access_code=code, owner_id=owner_id,
+        )
+        self._rooms[room_id] = room
+        return room
+
+    def _new_id(self) -> str:
+        while True:  # collision quasi impossible (31^8), mais on la gère
+            room_id = "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
+            if room_id not in self._rooms:
+                return room_id
 
     async def aclose(self) -> None:
         await asyncio.gather(*(r.aclose() for r in self._rooms.values()))
@@ -236,12 +356,15 @@ class RoomRegistry:
         limits = CheckLimits(
             settings.ws_max_concurrent_checks, settings.ws_max_pending_checks, settings.ws_check_timeout_seconds
         )
-        rooms = [
-            Room(
-                rid, title, category, theme, checker, limits,
-                max_message_chars=settings.ws_max_message_chars,
-                max_clients=settings.ws_max_room_connections,
+
+        def factory(**kw: Any) -> Room:
+            return Room(
+                checker=checker, limits=limits,
+                max_message_chars=settings.ws_max_message_chars, max_clients=settings.ws_max_room_connections, **kw,
             )
+
+        rooms = [
+            factory(room_id=rid, title=title, category=category, theme_category=theme, permanent=True)
             for rid, title, category, theme in SEED_ROOMS
         ]
-        return cls(rooms)
+        return cls(rooms, factory=factory, max_rooms=settings.max_rooms, idle_ttl_seconds=settings.room_idle_ttl_seconds)

@@ -1,6 +1,12 @@
 # Facts — frontend web
 
-Vite + React 19 + TypeScript (strict) + Tailwind 4. Deux pages : **Vérificateur IA** (`#/check`) et **Arène de débat** (`#/arena`, temps réel via WebSocket).
+Vite + React 19 + TypeScript (strict) + Tailwind 4. Pages (routage par fragment, sans configuration d'hébergeur) :
+
+- `#/check` : Vérificateur IA ;
+- `#/arena` : liste des salons publics, recherche par nom ou ID, création d'un salon (public ou privé) ;
+- `#/arena/<id>` : un salon en direct (WebSocket), avec saisie des arguments, score de fiabilité et, pour un salon privé, saisie du code d'accès.
+
+Identité : un jeton aléatoire est généré par le navigateur (`localStorage`) et envoyé en premier message du WebSocket ; le serveur n'en garde qu'une empreinte. Le code d'un salon privé est gardé le temps de l'onglet (`sessionStorage`), jamais dans l'URL.
 
 ## Développement
 

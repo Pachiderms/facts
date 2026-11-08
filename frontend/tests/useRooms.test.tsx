@@ -8,6 +8,33 @@ import { useRooms } from '../src/hooks/useRooms'
 
 const flush = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 
+describe('useRooms : recherche', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    listRooms.mockReset()
+    listRooms.mockResolvedValue([])
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it('transmet la recherche au serveur et relance la requête quand elle change', async () => {
+    const { rerender } = renderHook(({ q }) => useRooms(q), { initialProps: { q: '' } })
+    await flush(0)
+    expect(listRooms.mock.calls[0]![0]).toBe('')
+    rerender({ q: 'smic' })
+    await flush(0)
+    expect(listRooms).toHaveBeenCalledTimes(2)
+    expect(listRooms.mock.calls[1]![0]).toBe('smic')
+  })
+
+  it('l’ancienne recherche est annulée quand la nouvelle démarre', async () => {
+    const { rerender } = renderHook(({ q }) => useRooms(q), { initialProps: { q: 'a' } })
+    await flush(0)
+    const firstSignal = listRooms.mock.calls[0]![1] as AbortSignal
+    rerender({ q: 'ab' })
+    expect(firstSignal.aborted).toBe(true)
+  })
+})
+
 describe('useRooms : rafraîchissement poli', () => {
   beforeEach(() => {
     vi.useFakeTimers()

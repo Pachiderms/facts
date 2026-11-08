@@ -1,10 +1,14 @@
+import { getParticipantToken } from '../lib/identity'
 import { wsBase } from './client'
 import type { ServerEvent } from './types'
 
 export type SocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
 
-/** 1008 : salon inconnu ou origine refusée. Réessayer ne changerait rien. */
-const NO_RETRY_CODES = new Set([1000, 1008, 1009])
+/**
+ * 1008 : salon inconnu, code refusé ou origine refusée ; 4000 : même identité connectée dans un autre
+ * onglet (cette connexion a cédé sa place). Réessayer ne changerait rien, voire se disputerait la place.
+ */
+const NO_RETRY_CODES = new Set([1000, 1008, 1009, 4000])
 const BASE_DELAY_MS = 1_000
 const MAX_DELAY_MS = 30_000
 /** 1013 : « réessayez plus tard » (salon ou IP saturés) : on temporise davantage. */
@@ -38,6 +42,13 @@ interface Handlers {
   onStatus: (status: SocketStatus) => void
 }
 
+export interface SocketOptions {
+  /** Jeton d'identité ; par défaut celui du navigateur. */
+  token?: string
+  /** Code d'accès d'un salon privé. */
+  code?: string
+}
+
 /** Connexion WebSocket d'un salon, avec reconnexion automatique (backoff exponentiel + jitter). */
 export class RoomSocket {
   private ws: WebSocket | null = null
@@ -48,6 +59,7 @@ export class RoomSocket {
   constructor(
     private readonly roomId: string,
     private readonly handlers: Handlers,
+    private readonly options: SocketOptions = {},
   ) {}
 
   connect(): void {
@@ -60,6 +72,9 @@ export class RoomSocket {
     const ws = new WebSocket(`${wsBase()}/api/v1/rooms/${encodeURIComponent(this.roomId)}/ws`)
     this.ws = ws
     ws.onopen = () => {
+      // Premier message obligatoire : identité et, pour un salon privé, code d'accès.
+      const { code } = this.options
+      ws.send(JSON.stringify({ type: 'hello', token: this.options.token ?? getParticipantToken(), ...(code ? { code } : {}) }))
       this.attempt = 0
       this.handlers.onStatus('open')
     }

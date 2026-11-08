@@ -59,10 +59,19 @@ Règle de dépendance : `api -> services -> adapters/core`. Recherche et LLM son
 ## Endpoints
 
 - `POST /api/v1/check` : `{"assertion": "...", "institutional_filter": true}` -> verdict, confiance, deux perspectives, sources revalidées.
-- `GET /api/v1/rooms` : liste des salons avec score de fiabilité.
+- `GET /api/v1/rooms?q=` : salons **publics** (salons par défaut d'abord, puis les plus actifs) ; `q` filtre par titre, catégorie ou ID, sans accents ni casse.
+- `GET /api/v1/rooms/{id}` : recherche par ID. Un salon privé répond seulement `requires_code: true` (ni titre ni contenu).
+- `POST /api/v1/rooms` : `{"title", "theme_category", "visibility": "public"|"private", "participant_token"}` -> `{id, visibility, access_code}`. Le code (6 caractères) n'existe que pour un salon privé ; le propriétaire le retrouve dans le `snapshot` de son salon.
 - `WS /api/v1/rooms/{id}/ws` : salon en direct.
-  - client -> serveur : `{"type": "message", "text": "..."}`
-  - serveur -> client : `snapshot` (rôle attribué + historique), `presence`, `message` (état `pending`), `check_result` (badge, sources, `trust_score`, `trust_delta`), `error`.
+  - client -> serveur : **premier message obligatoire** `{"type": "hello", "token": "<jeton>", "code": "<code si privé>"}`, puis `{"type": "message", "text": "..."}`.
+  - serveur -> client : `snapshot` (rôle attribué + historique), `presence`, `message` (état `pending`), `check_result` (badge, sources, `trust_score`, `trust_delta`), `error` (`invalid_hello`, `invalid_code`, `too_many_attempts`, `session_replaced`, ...).
+
+### Identité anonyme et salons créés par les utilisateurs
+
+- Le navigateur génère un jeton aléatoire (22 à 64 caractères) et le garde en local ; le serveur n'en conserve que l'empreinte SHA-256 tronquée. Elle désigne le propriétaire d'un salon et garantit **un seul siège d'intervenant par personne** : une seconde connexion (autre onglet, reconnexion) remplace la première et hérite de son rôle.
+- Ce n'est pas un compte : vider le navigateur change d'identité. Des comptes pourront venir plus tard.
+- Coût zéro, mémoire bornée : 50 salons maximum, 3 créations par jour et par visiteur, suppression d'un salon non permanent, vide et inactif depuis 30 minutes. Les 3 salons par défaut sont permanents.
+- Salons privés : absents de la liste et de la recherche ; code comparé à temps constant ; 5 codes erronés par 10 minutes et par IP, puis plus aucun essai (même avec le bon code) jusqu'à la fin de la fenêtre.
 
 ## Pipeline du chatbot
 
@@ -121,6 +130,6 @@ participants anonymes, rôles A/B attribués par le serveur.
 ## Prochaines étapes
 
 1. Brancher le front (`facts_app_preview.tsx`) sur ces endpoints à la place des données simulées.
-2. Création de salons par les utilisateurs (avec authentification légère et quotas).
+2. Reformulation du thème par l'agent, modération (avertissements, exclusion), kick encadré par un score individuel.
 3. Redis (offre gratuite) pour cache, rate limit et diffusion multi-instances.
 4. CI GitHub Actions : `pytest` à chaque push.

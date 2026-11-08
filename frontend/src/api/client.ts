@@ -1,4 +1,5 @@
-import type { CheckResponse, RoomSummary, Verdict } from './types'
+import { getParticipantToken } from '../lib/identity'
+import type { CheckResponse, CreatedRoom, CreateRoomInput, RoomLookup, RoomSummary, Verdict } from './types'
 
 /** Erreur d'API déjà formulée en français pour l'utilisateur : jamais de détail technique. */
 export class ApiError extends Error {
@@ -62,7 +63,10 @@ const FALLBACK_MESSAGES: Record<number, string> = {
   503: 'Service momentanément saturé. Réessayez plus tard.',
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+async function toApiError(
+  response: Response,
+  invalidMessage = 'Affirmation invalide : saisissez entre 10 et 500 caractères.',
+): Promise<ApiError> {
   const retry = Number(response.headers.get('retry-after'))
   const retryAfter = Number.isFinite(retry) && retry > 0 ? retry : null
   let detail: unknown
@@ -74,7 +78,7 @@ async function toApiError(response: Response): Promise<ApiError> {
   // Les `detail` en chaîne viennent de nos messages serveur (génériques). Un `detail` en liste
   // est une erreur de validation Pydantic : technique, donc remplacée par un message clair.
   if (response.status === 422 && typeof detail !== 'string') {
-    return new ApiError(422, 'Affirmation invalide : saisissez entre 10 et 500 caractères.')
+    return new ApiError(422, invalidMessage)
   }
   const message =
     (typeof detail === 'string' && detail) || FALLBACK_MESSAGES[response.status] || 'Une erreur est survenue. Réessayez.'
@@ -119,12 +123,74 @@ export async function checkAssertion(
   return data
 }
 
-export async function listRooms(signal?: AbortSignal): Promise<RoomSummary[]> {
-  const response = await request('/api/v1/rooms', { signal }, 20_000)
+const isVisibility = (v: unknown): v is 'public' | 'private' => v === 'public' || v === 'private'
+
+export function isRoomSummary(v: unknown): v is RoomSummary {
+  return (
+    isRecord(v) &&
+    typeof v.id === 'string' &&
+    typeof v.title === 'string' &&
+    typeof v.category === 'string' &&
+    typeof v.theme_category === 'string' &&
+    isVisibility(v.visibility) &&
+    (v.trust_score === null || typeof v.trust_score === 'number') &&
+    typeof v.message_count === 'number' &&
+    typeof v.participants === 'number' &&
+    typeof v.spectators === 'number'
+  )
+}
+
+const BAD_RESPONSE = () => new ApiError(502, 'Réponse inattendue du serveur.')
+
+export async function listRooms(query = '', signal?: AbortSignal): Promise<RoomSummary[]> {
+  const q = query.trim()
+  const path = q ? `/api/v1/rooms?q=${encodeURIComponent(q.slice(0, 60))}` : '/api/v1/rooms'
+  const response = await request(path, { signal }, 20_000)
   if (!response.ok) throw await toApiError(response)
   const data: unknown = await response.json().catch(() => null)
-  if (!Array.isArray(data)) throw new ApiError(502, 'Réponse inattendue du serveur.')
-  return data as RoomSummary[]
+  if (!Array.isArray(data) || !data.every(isRoomSummary)) throw BAD_RESPONSE()
+  return data
+}
+
+/** Recherche par ID. 404 si inconnu. Un salon privé répond seulement `requires_code`. */
+export async function lookupRoom(id: string, signal?: AbortSignal): Promise<RoomLookup> {
+  const response = await request(`/api/v1/rooms/${encodeURIComponent(id)}`, { signal }, 20_000)
+  if (!response.ok) throw await toApiError(response)
+  const data: unknown = await response.json().catch(() => null)
+  if (
+    !isRecord(data) ||
+    typeof data.id !== 'string' ||
+    !isVisibility(data.visibility) ||
+    typeof data.requires_code !== 'boolean' ||
+    !(data.room === null || isRoomSummary(data.room))
+  ) {
+    throw BAD_RESPONSE()
+  }
+  return data as unknown as RoomLookup
+}
+
+export async function createRoom(input: CreateRoomInput, signal?: AbortSignal): Promise<CreatedRoom> {
+  const response = await request(
+    '/api/v1/rooms',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...input, participant_token: getParticipantToken() }),
+      signal,
+    },
+    30_000,
+  )
+  if (!response.ok) throw await toApiError(response, 'Titre ou thème invalide : le titre doit faire entre 10 et 120 caractères.')
+  const data: unknown = await response.json().catch(() => null)
+  if (
+    !isRecord(data) ||
+    typeof data.id !== 'string' ||
+    !isVisibility(data.visibility) ||
+    !(data.access_code === null || typeof data.access_code === 'string')
+  ) {
+    throw BAD_RESPONSE()
+  }
+  return data as unknown as CreatedRoom
 }
 
 /** Réveille un hébergeur gratuit en veille dès l'ouverture de l'application (réponse ignorée). */
