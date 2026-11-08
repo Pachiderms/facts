@@ -1,6 +1,6 @@
-import { Globe, Lock } from 'lucide-react'
-import { useId, useRef, useState, type FormEvent } from 'react'
-import { createRoom } from '../../api/client'
+import { Globe, Lock, Sparkles } from 'lucide-react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { ApiError, createRoom, reformulateTitle, type Reformulation } from '../../api/client'
 import { PARTICIPANTS_MAX, PARTICIPANTS_MIN, ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
 import { recordVisit } from '../../lib/history'
 import { rememberCode } from '../../lib/identity'
@@ -16,11 +16,47 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inFlight = useRef(false)
+  // Reformulation par l'IA : proposition à accepter ou ignorer, jamais appliquée automatiquement.
+  const [suggestion, setSuggestion] = useState<Reformulation | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestError, setSuggestError] = useState<string | null>(null)
+  const suggestAbort = useRef<AbortController | null>(null)
+  useEffect(() => () => suggestAbort.current?.abort(), [])
   const ids = { title: useId(), theme: useId(), seats: useId() }
 
   const trimmed = title.trim()
   const tooShort = trimmed.length < ROOM_TITLE_MIN
-  const canSubmit = !tooShort && !busy
+  // Sujet refusé par l'IA (hors débat, illégal...) : création bloquée tant que le titre n'est pas modifié.
+  const [refusedTitle, setRefusedTitle] = useState<string | null>(null)
+  const refused = refusedTitle !== null && refusedTitle === trimmed
+  const canSubmit = !tooShort && !busy && !refused
+
+  const editTitle = (value: string) => {
+    setTitle(value)
+    setSuggestion(null) // une proposition ne vaut que pour le texte sur lequel elle a été demandée
+    setSuggestError(null)
+  }
+
+  const suggest = async () => {
+    if (suggesting || trimmed.length < 3) return
+    suggestAbort.current?.abort()
+    const controller = new AbortController()
+    suggestAbort.current = controller
+    setSuggesting(true)
+    setSuggestError(null)
+    setSuggestion(null)
+    try {
+      const result = await reformulateTitle(trimmed, controller.signal)
+      if (!controller.signal.aborted) setSuggestion(result)
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        if (err instanceof ApiError && err.status === 422) setRefusedTitle(trimmed)
+        setSuggestError(err instanceof Error ? err.message : 'Reformulation impossible. Réessayez.')
+      }
+    } finally {
+      if (!controller.signal.aborted) setSuggesting(false)
+    }
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -42,6 +78,7 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
       if (created.access_code) rememberCode(created.id, created.access_code)
       window.location.hash = roomHref(created.id)
     } catch (err) {
+      if (err instanceof ApiError && err.status === 422) setRefusedTitle(trimmed) // le serveur a refusé ce sujet
       setError(err instanceof Error ? err.message : 'Création impossible. Réessayez.')
       inFlight.current = false
       setBusy(false)
@@ -61,13 +98,56 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
           type="text"
           value={title}
           maxLength={ROOM_TITLE_MAX}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => editTitle(e.target.value)}
           placeholder="Ex. : Faut-il instaurer un revenu universel en France ?"
           className="w-full rounded-xl border border-neutral-300 bg-neutral-50 px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900"
         />
         <p className={`text-[11px] ${tooShort && trimmed.length > 0 ? 'text-amber-700' : 'text-neutral-500'}`}>
           {trimmed.length}/{ROOM_TITLE_MAX} · formulez une question neutre, au moins {ROOM_TITLE_MIN} caractères
         </p>
+        <button
+          type="button"
+          onClick={suggest}
+          disabled={suggesting || trimmed.length < 3}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral-800 hover:border-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Sparkles className="h-3 w-3" aria-hidden="true" />
+          {suggesting ? 'Reformulation…' : 'Proposer une reformulation'}
+        </button>
+        {suggestError && (
+          <p role="alert" className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-800">
+            {suggestError}
+          </p>
+        )}
+        {suggestion && (
+          <div role="status" aria-label="Proposition de reformulation" className="space-y-2 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500">Proposition de l’IA</p>
+            <p className="text-sm font-bold text-neutral-900">{suggestion.title}</p>
+            <p className="text-[11px] text-neutral-600">
+              Thème : <span className="font-bold">{themeBadge(suggestion.theme_category).name}</span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTitle(suggestion.title)
+                  setTheme(suggestion.theme_category)
+                  setSuggestion(null)
+                }}
+                className="rounded-lg bg-neutral-900 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-1"
+              >
+                Utiliser cette question
+              </button>
+              <button
+                type="button"
+                onClick={() => setSuggestion(null)}
+                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-[11px] font-bold text-neutral-700 hover:border-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+              >
+                Garder mon titre
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -152,6 +232,12 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
       {error && (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-900">
           {error}
+        </p>
+      )}
+
+      {refused && !error && !suggestError && (
+        <p role="status" className="text-[11px] font-medium text-neutral-600">
+          Ce sujet a été refusé : modifiez le titre pour pouvoir créer le salon.
         </p>
       )}
 

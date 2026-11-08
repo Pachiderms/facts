@@ -218,3 +218,26 @@ async def test_hostile_search_snippet_cannot_close_the_prompt_block():
     user_prompt = llm.calls[1]["user"]
     assert user_prompt.count("</SEARCH_RESULTS>") == 1
     assert user_prompt.count("<ASSERTION>") == 1
+
+
+async def test_summary_is_trimmed_to_whole_sentences_not_rejected_or_cut():
+    long_summary = "Première phrase complète. " + "Une phrase intermédiaire assez longue pour remplir la place. " * 20
+    llm = ScriptedLLM(QUERIES, analysis(summary=long_summary))
+    service, _ = make_service(llm)
+    out = await service.check(ASSERTION)
+    assert len(out.summary) <= 600 and out.summary.endswith(".")
+    assert out.summary.startswith("Première phrase complète.")
+
+
+async def test_summary_cut_by_the_model_drops_the_dangling_fragment():
+    llm = ScriptedLLM(QUERIES, analysis(summary="Le SMIC a augmenté. Les économistes estiment que l'effet sur l'empl"))
+    service, _ = make_service(llm)
+    out = await service.check(ASSERTION)
+    assert out.summary == "Le SMIC a augmenté."
+
+
+async def test_prompt_demands_complete_sentences():
+    llm = ScriptedLLM(QUERIES, analysis())
+    service, _ = make_service(llm)
+    await service.check(ASSERTION)
+    assert "COMPLÈTE" in llm.calls[1]["system"] and "Ne coupe jamais une phrase" in llm.calls[1]["system"]

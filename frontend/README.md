@@ -45,3 +45,4 @@ Cloudflare Pages : racine `frontend`, commande `npm run build`, sortie `dist`, v
 - « Mes salons » : historique local (20 entrées, épinglage, statut « Expiré » via `GET /rooms/status`). Le code d'un salon privé y est gardé **sur cet appareil uniquement**, pour revenir sans le redemander.
 - Lien d'invitation `#/arena/<id>?code=<code>` : le code est lu puis retiré de la barre d'adresse.
 - Le créateur d'un salon vide peut le supprimer (confirmation en deux temps).
+- « Proposer une reformulation » : l'IA suggère une question neutre et un thème ; rien n'est appliqué sans clic sur « Utiliser cette question ».

@@ -7,16 +7,19 @@ Protocole WebSocket (JSON) :
 """
 
 import asyncio
+import logging
 import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
 
+from app.adapters.llm import LLMError, LLMRateLimitError
 from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
 from app.core.config import Settings
 from app.core.identity import is_valid_token, participant_id
 from app.core.security import InvalidInputError, get_client_ip, looks_like_prompt_injection, sanitize_text
+from app.services.reformulation import ReformulationError, ReformulationRefused
 from app.services.rooms import (
     MAX_PARTICIPANTS,
     MIN_PARTICIPANTS,
@@ -29,6 +32,7 @@ from app.services.rooms import (
     TooManyRoomsError,
 )
 
+logger = logging.getLogger("facts.api")
 router = APIRouter(prefix="/api/v1", tags=["rooms"])
 
 ROOM_ID_RE = re.compile(r"[a-z0-9-]{1,64}")
@@ -102,6 +106,16 @@ class CreateRoomRequest(BaseModel):
         return v
 
 
+class ReformulateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(max_length=400)
+
+
+class Reformulated(BaseModel):
+    title: str
+    theme_category: str
+
+
 class CreatedRoom(BaseModel):
     id: str
     visibility: Literal["public", "private"]
@@ -162,6 +176,64 @@ async def lookup_room(request: Request, room_id: str):
     return RoomLookup(id=room.id, visibility="public", requires_code=False, room=room.summary())
 
 
+@router.post("/rooms/reformulate", response_model=Reformulated, dependencies=[Depends(enforce_rate_limit)])
+async def reformulate_room_title(request: Request, body: ReformulateRequest):
+    """Propose une question neutre + un thème pour un sujet saisi. Un appel LLM, plafonné par jour."""
+    app = request.app
+    settings: Settings = app.state.settings
+    reformulator = app.state.reformulator
+    if reformulator is None:
+        raise HTTPException(status_code=503, detail="Reformulation indisponible.")
+    try:
+        sanitize_text(body.title, 400)
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None  # sans coût : avant le quota
+
+    ip = get_client_ip(request, settings.trust_proxy_headers)
+    limiter = app.state.daily_reformulation_limiter
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Limite quotidienne de reformulations atteinte. Saisissez votre titre directement.",
+            headers={"Retry-After": str(limiter.retry_after(ip))},
+        )
+    try:
+        result = await reformulator.reformulate(body.title)
+    except ReformulationRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except LLMRateLimitError:
+        raise HTTPException(status_code=503, detail="Service momentanément saturé, réessayez plus tard.", headers={"Retry-After": "30"}) from None
+    except (LLMError, ReformulationError):
+        logger.warning("reformulation indisponible")
+        raise HTTPException(status_code=502, detail="La reformulation est momentanément indisponible.") from None
+    return Reformulated(title=result.title, theme_category=result.theme_category)
+
+
+async def _ensure_relevant(request: Request, title: str, ip: str) -> None:
+    """Refuse (422) un sujet que l'IA juge hors débat ou illégal.
+
+    Ouvert en cas de panne : si l'IA est indisponible, saturée ou si le quota de contrôles du jour
+    est épuisé, la création reste possible (au pire 3 salons par jour et par visiteur, supprimés après
+    30 min d'inactivité). Un titre déjà approuvé (reformulation acceptée) n'appelle pas l'IA.
+    """
+    reformulator = request.app.state.reformulator
+    if reformulator is None or reformulator.is_approved(title):
+        return
+    if not request.app.state.daily_reformulation_limiter.allow(ip):
+        logger.warning("contrôle de pertinence ignoré : quota quotidien atteint")
+        return
+    try:
+        await reformulator.reformulate(title)
+    except ReformulationRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except (LLMError, ReformulationError):
+        logger.warning("contrôle de pertinence indisponible : création autorisée")
+
+
 @router.post("/rooms", response_model=CreatedRoom, status_code=201, dependencies=[Depends(enforce_rate_limit)])
 async def create_room(request: Request, body: CreateRoomRequest):
     app = request.app
@@ -175,8 +247,13 @@ async def create_room(request: Request, body: CreateRoomRequest):
     if looks_like_prompt_injection(title):
         raise HTTPException(status_code=422, detail="Titre refusé.")
 
-    # Après la validation : une requête invalide ne consomme pas le quota quotidien.
+    # Pertinence du sujet : le bouton « reformuler » est facultatif, donc le contrôle est aussi côté
+    # serveur (sinon il suffirait de ne pas cliquer pour créer un salon poubelle). Avant le quota de
+    # création : un sujet refusé ne coûte rien à l'utilisateur.
     ip = get_client_ip(request, settings.trust_proxy_headers)
+    await _ensure_relevant(request, title, ip)
+
+    # Après la validation : une requête invalide ne consomme pas le quota quotidien.
     limiter = app.state.daily_room_limiter
     if not limiter.allow(ip):
         raise HTTPException(
