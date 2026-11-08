@@ -45,6 +45,18 @@ class TooManyRoomsError(RoomError):
     pass
 
 
+class SpectatorsNotAllowedError(RoomError):
+    pass
+
+
+class RoomNotFoundError(RoomError):
+    pass
+
+
+class RoomNotEmptyError(RoomError):
+    pass
+
+
 THEMES: dict[str, str] = {  # theme_category -> libellé par défaut de la catégorie
     "social": "Économie & Emploi",
     "souverain": "Énergie & Souveraineté",
@@ -53,12 +65,15 @@ THEMES: dict[str, str] = {  # theme_category -> libellé par défaut de la caté
 }
 ID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # sans caractères ambigus (i, l, o, 0, 1)
 ID_LENGTH, CODE_LENGTH = 8, 6
+SEAT_LETTERS = "ABCDEF"  # un siège par lettre : de 2 à 6 intervenants par salon
+MIN_PARTICIPANTS, MAX_PARTICIPANTS = 2, len(SEAT_LETTERS)
+MAX_SPECTATORS = 20
 
 
 @dataclass
 class Client:
     id: str
-    role: str  # "A", "B" ou "spectator" : attribué par le SERVEUR, jamais choisi par le client
+    role: str  # une lettre de siège ("A"...) ou "spectator" : attribué par le SERVEUR, jamais choisi par le client
     send: SendFn
     participant_id: str = ""
     close: Callable[[], Awaitable[None]] | None = field(default=None, repr=False)
@@ -90,10 +105,16 @@ class Room:
         access_code: str | None = None,
         owner_id: str | None = None,
         permanent: bool = False,
+        max_participants: int = 2,
+        spectators_allowed: bool = True,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.id, self.title, self.category, self.theme_category = room_id, title, category, theme_category
         self.visibility, self._access_code, self.owner_id, self.permanent = visibility, access_code, owner_id, permanent
+        if not MIN_PARTICIPANTS <= max_participants <= MAX_PARTICIPANTS:
+            raise ValueError("max_participants hors limites")
+        self.max_participants, self.spectators_allowed = max_participants, spectators_allowed
+        self.seats = SEAT_LETTERS[:max_participants]
         self._clock = clock
         self.last_activity = clock()
         self._checker, self._limits = checker, limits
@@ -112,12 +133,12 @@ class Room:
         return compute_trust_score(self.counts)
 
     def _presence(self) -> dict[str, Any]:
-        roles = {c.role for c in self.clients.values()}
+        roles = [c.role for c in self.clients.values()]
         return {
             "type": "presence",
-            "A": "A" in roles,
-            "B": "B" in roles,
-            "spectators": sum(1 for c in self.clients.values() if c.role == "spectator"),
+            "seats": [seat for seat in self.seats if seat in roles],  # sièges occupés, dans l'ordre
+            "max_participants": self.max_participants,
+            "spectators": roles.count("spectator"),
         }
 
     def summary(self) -> dict[str, Any]:
@@ -130,13 +151,16 @@ class Room:
             "visibility": self.visibility,
             "trust_score": self.trust_score,
             "message_count": self.total_messages,
-            "participants": sum(1 for r in roles if r in ("A", "B")),
-            "spectators": sum(1 for r in roles if r == "spectator"),
+            "max_participants": self.max_participants,
+            "spectators_allowed": self.spectators_allowed,
+            "participants": sum(1 for r in roles if r != "spectator"),
+            "spectators": roles.count("spectator"),
         }
 
     def snapshot(self, role: str, participant: str = "") -> dict[str, Any]:
         room = self.summary()
-        if self.is_owner(participant) and self._access_code:
+        room["is_owner"] = self.is_owner(participant)  # permet d'afficher « Supprimer » au seul créateur
+        if room["is_owner"] and self._access_code:
             room["access_code"] = self._access_code  # visible du seul propriétaire, pour le partager
         return {"type": "snapshot", "role": role, "room": room, "messages": copy.deepcopy(list(self.messages))}
 
@@ -182,7 +206,15 @@ class Room:
             role = replaced.role
         else:
             taken = {c.role for c in self.clients.values()}
-            role = "A" if "A" not in taken else "B" if "B" not in taken else "spectator"
+            free_seat = next((seat for seat in self.seats if seat not in taken), None)
+            if free_seat is not None:
+                role = free_seat
+            elif not self.spectators_allowed:
+                raise SpectatorsNotAllowedError("Les spectateurs ne sont pas admis dans ce salon.")
+            elif sum(1 for c in self.clients.values() if c.role == "spectator") >= MAX_SPECTATORS:
+                raise RoomFullError("Salon complet.")
+            else:
+                role = "spectator"
         client = Client(id=secrets.token_hex(8), role=role, send=send, participant_id=pid, close=close)
         self.clients[client.id] = client
         self.last_activity = self._clock()
@@ -192,6 +224,19 @@ class Room:
         if self.clients.pop(client_id, None) is not None:
             self.last_activity = self._clock()
             await self.broadcast(self._presence())
+
+    async def shutdown(self, code: str, detail: str) -> None:
+        """Ferme proprement toutes les connexions (salon supprimé) puis les tâches de vérification."""
+        clients = list(self.clients.values())
+        self.clients.clear()
+        for client in clients:
+            try:
+                await client.send({"type": "error", "code": code, "detail": detail})
+                if client.close is not None:
+                    await client.close()
+            except Exception:
+                pass  # connexion déjà morte
+        await self.aclose()
 
     async def broadcast_presence(self) -> None:
         await self.broadcast(self._presence())
@@ -213,7 +258,7 @@ class Room:
 
     # ---------- messages ----------
     async def post_message(self, client: Client, text: str) -> dict[str, Any]:
-        if client.role not in ("A", "B"):
+        if client.role == "spectator":
             raise NotAllowedError("Les spectateurs ne peuvent pas intervenir.")
         clean = sanitize_text(text, self._max_chars)  # lève InvalidInputError si vide / trop long
         self.last_activity = self._clock()
@@ -327,7 +372,32 @@ class RoomRegistry:
         await asyncio.gather(*(r.aclose() for r in stale))
         return len(stale)
 
-    async def create(self, *, title: str, theme_category: str, visibility: str, owner_id: str) -> Room:
+    def existing(self, ids: list[str]) -> list[str]:
+        """Parmi `ids`, ceux qui existent encore (historique « Mes salons » : repérer les salons expirés)."""
+        return [i for i in dict.fromkeys(ids) if i in self._rooms]
+
+    async def delete(self, room_id: str, requester_id: str) -> None:
+        """Suppression par le créateur, uniquement si personne d'autre n'est connecté."""
+        room = self._rooms.get(room_id)
+        if room is None:
+            raise RoomNotFoundError("Salon introuvable.")
+        if room.permanent or not room.is_owner(requester_id):
+            raise NotAllowedError("Seul le créateur peut supprimer ce salon.")
+        if any(c.participant_id != requester_id for c in room.clients.values()):
+            raise RoomNotEmptyError("D'autres personnes sont connectées : le salon ne peut pas être supprimé maintenant.")
+        del self._rooms[room_id]
+        await room.shutdown("room_deleted", "Ce salon a été supprimé par son créateur.")
+
+    async def create(
+        self,
+        *,
+        title: str,
+        theme_category: str,
+        visibility: str,
+        owner_id: str,
+        max_participants: int = 2,
+        spectators_allowed: bool = True,
+    ) -> Room:
         if self._factory is None:
             raise RuntimeError("Création de salons non configurée.")
         await self.purge_idle()
@@ -338,6 +408,7 @@ class RoomRegistry:
         room = self._factory(
             room_id=room_id, title=title, category=THEMES[theme_category], theme_category=theme_category,
             visibility=visibility, access_code=code, owner_id=owner_id,
+            max_participants=max_participants, spectators_allowed=spectators_allowed,
         )
         self._rooms[room_id] = room
         return room

@@ -8,7 +8,7 @@ Protocole WebSocket (JSON) :
 
 import asyncio
 import re
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -17,7 +17,17 @@ from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
 from app.core.config import Settings
 from app.core.identity import is_valid_token, participant_id
 from app.core.security import InvalidInputError, get_client_ip, looks_like_prompt_injection, sanitize_text
-from app.services.rooms import THEMES, NotAllowedError, RoomFullError, TooManyRoomsError
+from app.services.rooms import (
+    MAX_PARTICIPANTS,
+    MIN_PARTICIPANTS,
+    THEMES,
+    NotAllowedError,
+    RoomFullError,
+    RoomNotEmptyError,
+    RoomNotFoundError,
+    SpectatorsNotAllowedError,
+    TooManyRoomsError,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["rooms"])
 
@@ -37,6 +47,8 @@ class RoomSummary(BaseModel):
     category: str
     theme_category: str
     visibility: Literal["public", "private"]
+    max_participants: int
+    spectators_allowed: bool
     trust_score: int | None
     message_count: int
     participants: int
@@ -68,6 +80,9 @@ class CreateRoomRequest(BaseModel):
     title: str = Field(max_length=400)  # borne large : la vraie limite (120) est appliquée après nettoyage
     theme_category: str
     visibility: Literal["public", "private"] = "public"
+    # strict : « 3 », 3.0 ou true ne sont pas acceptés comme nombre de participants
+    max_participants: Annotated[int, Field(strict=True, ge=MIN_PARTICIPANTS, le=MAX_PARTICIPANTS)] = 2
+    spectators_allowed: Annotated[bool, Field(strict=True)] = True
     participant_token: str
 
     @field_validator("participant_token")
@@ -91,6 +106,25 @@ class CreatedRoom(BaseModel):
     access_code: str | None = None  # affiché une seule fois ; le propriétaire le retrouve dans son salon
 
 
+class DeleteRoomRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    participant_token: str
+
+    @field_validator("participant_token")
+    @classmethod
+    def _token_format(cls, v: str) -> str:
+        if not is_valid_token(v):
+            raise ValueError("jeton invalide")
+        return v
+
+
+class RoomStatuses(BaseModel):
+    existing: list[str]
+
+
+MAX_STATUS_IDS = 20
+
+
 class RoomLookup(BaseModel):
     """Résultat d'une recherche par ID. Un salon privé ne révèle ni titre ni contenu."""
 
@@ -105,6 +139,15 @@ async def list_rooms(request: Request, q: str | None = Query(default=None, max_l
     registry = request.app.state.rooms
     await registry.purge_idle()
     return registry.summaries(q)
+
+
+@router.get("/rooms/status", response_model=RoomStatuses, dependencies=[Depends(enforce_read_rate_limit)])
+async def rooms_status(request: Request, ids: str = Query(max_length=1500)):
+    """Quels salons de l'historique existent encore ? Une seule requête pour toute la liste."""
+    wanted = [i for i in ids.split(",") if i]
+    if not wanted or len(wanted) > MAX_STATUS_IDS or not all(ROOM_ID_RE.fullmatch(i) for i in wanted):
+        raise HTTPException(status_code=422, detail="Liste d'identifiants invalide.")
+    return RoomStatuses(existing=request.app.state.rooms.existing(wanted))
 
 
 @router.get("/rooms/{room_id}", response_model=RoomLookup, dependencies=[Depends(enforce_read_rate_limit)])
@@ -145,6 +188,8 @@ async def create_room(request: Request, body: CreateRoomRequest):
             theme_category=body.theme_category,
             visibility=body.visibility,
             owner_id=participant_id(body.participant_token),
+            max_participants=body.max_participants,
+            spectators_allowed=body.spectators_allowed,
         )
     except TooManyRoomsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
@@ -164,6 +209,21 @@ def _origin_allowed(ws: WebSocket, settings: Settings) -> bool:
 
 async def _error(ws: WebSocket, code: str, detail: str) -> None:
     await ws.send_json({"type": "error", "code": code, "detail": detail})
+
+
+@router.post("/rooms/{room_id}/delete", status_code=204, dependencies=[Depends(enforce_rate_limit)])
+async def delete_room(request: Request, room_id: str, body: DeleteRoomRequest):
+    """Suppression par le créateur d'un salon vide. (POST : le CORS du projet n'autorise que GET et POST.)"""
+    if not ROOM_ID_RE.fullmatch(room_id):
+        raise HTTPException(status_code=404, detail="Salon introuvable.")
+    try:
+        await request.app.state.rooms.delete(room_id, participant_id(body.participant_token))
+    except RoomNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    except NotAllowedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from None
+    except RoomNotEmptyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @router.websocket("/rooms/{room_id}/ws")
@@ -203,7 +263,11 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
 
         try:
             client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED))
+        except SpectatorsNotAllowedError as exc:
+            await _reject(ws, "spectators_not_allowed", str(exc))
+            return
         except RoomFullError:
+            await _error(ws, "room_full", "Salon complet. Nouvelle tentative automatique.")
             await ws.close(code=WS_TRY_AGAIN_LATER)
             return
         if replaced is not None:
