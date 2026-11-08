@@ -17,6 +17,7 @@ from app.core.config import Settings, get_settings
 from app.core.security import SlidingWindowRateLimiter
 from app.services.factcheck import FactCheckService
 from app.services.message_checker import FactCheckMessageChecker
+from app.services.reformulation import ThemeReformulator
 from app.services.retrieval import Retriever
 from app.services.rooms import RoomRegistry
 
@@ -45,6 +46,10 @@ def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibl
     return FactCheckService(llm, retriever, cache, settings.assertion_max_chars), llm, search
 
 
+def build_reformulator(settings: Settings, llm: OpenAICompatibleLLM) -> ThemeReformulator:
+    return ThemeReformulator(llm, title_min=settings.room_title_min_chars, title_max=settings.room_title_max_chars)
+
+
 def build_rooms(settings: Settings, service: FactCheckService) -> RoomRegistry:
     return RoomRegistry.seeded(FactCheckMessageChecker(service), settings)
 
@@ -54,6 +59,7 @@ def create_app(
     service: FactCheckService | None = None,
     limiter: SlidingWindowRateLimiter | None = None,
     rooms: RoomRegistry | None = None,
+    reformulator: ThemeReformulator | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -62,6 +68,8 @@ def create_app(
         llm = search = None
         if app.state.service is None:
             app.state.service, llm, search = build_service(settings)
+            if app.state.reformulator is None:
+                app.state.reformulator = build_reformulator(settings, llm)
         if app.state.rooms is None:
             app.state.rooms = build_rooms(settings, app.state.service)
         yield
@@ -82,6 +90,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.service = service
+    app.state.reformulator = reformulator
     app.state.limiter = limiter or SlidingWindowRateLimiter(
         settings.rate_limit_requests, settings.rate_limit_window_seconds
     )
@@ -94,6 +103,7 @@ def create_app(
     app.state.daily_check_limiter = SlidingWindowRateLimiter(settings.daily_check_limit, 86_400)
     app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
     app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
+    app.state.daily_reformulation_limiter = SlidingWindowRateLimiter(settings.daily_reformulation_limit, 86_400)
     app.state.code_limiter = SlidingWindowRateLimiter(settings.room_code_max_failures, settings.room_code_window_seconds)
 
     app.add_middleware(
