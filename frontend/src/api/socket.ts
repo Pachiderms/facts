@@ -47,6 +47,8 @@ export interface SocketOptions {
   token?: string
   /** Code d'accès d'un salon privé. */
   code?: string
+  /** Entrer en spectateur même s'il reste des sièges d'intervenant. */
+  spectate?: boolean
 }
 
 /** Connexion WebSocket d'un salon, avec reconnexion automatique (backoff exponentiel + jitter). */
@@ -73,8 +75,15 @@ export class RoomSocket {
     this.ws = ws
     ws.onopen = () => {
       // Premier message obligatoire : identité et, pour un salon privé, code d'accès.
-      const { code } = this.options
-      ws.send(JSON.stringify({ type: 'hello', token: this.options.token ?? getParticipantToken(), ...(code ? { code } : {}) }))
+      const { code, spectate } = this.options
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          token: this.options.token ?? getParticipantToken(),
+          ...(code ? { code } : {}),
+          ...(spectate ? { spectate: true } : {}),
+        }),
+      )
       this.attempt = 0
       this.handlers.onStatus('open')
     }

@@ -44,7 +44,7 @@ describe('useRoom', () => {
     renderHook(() => useRoom('abcd2345', 'k7m2xq'))
     expect(instances).toHaveLength(1)
     expect(instances[0]!.roomId).toBe('abcd2345')
-    expect(instances[0]!.options).toEqual({ code: 'k7m2xq' })
+    expect(instances[0]!.options).toEqual({ code: 'k7m2xq', spectate: false })
     expect(instances[0]!.connect).toHaveBeenCalled()
   })
 

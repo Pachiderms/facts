@@ -125,9 +125,9 @@ describe('RoomList : filtre par thème et « Voir plus »', () => {
   it('affiche 9 salons puis le reste au clic', async () => {
     const rooms = Array.from({ length: 12 }, (_, i) => room(i))
     render(<RoomList rooms={rooms} error={null} searching={false} />)
-    expect(screen.getAllByRole('link')).toHaveLength(9)
+    expect(screen.getAllByRole('link', { name: /^(?!Regarder).*Salon numéro/ })).toHaveLength(9)
     await userEvent.click(screen.getByRole('button', { name: /Voir plus \(3\)/ }))
-    expect(screen.getAllByRole('link')).toHaveLength(12)
+    expect(screen.getAllByRole('link', { name: /^(?!Regarder).*Salon numéro/ })).toHaveLength(12)
     expect(screen.queryByRole('button', { name: /Voir plus/ })).not.toBeInTheDocument()
   })
 
@@ -139,11 +139,24 @@ describe('RoomList : filtre par thème et « Voir plus »', () => {
     const buttons = Array.from(group.querySelectorAll('button'))
     expect(buttons).toHaveLength(3) // Tous + 2 thèmes
     await userEvent.click(buttons[2]!)
-    expect(screen.getAllByRole('link').length).toBeLessThan(3)
+    expect(screen.getAllByRole('link', { name: /^(?!Regarder).*Salon numéro/ })).toHaveLength(2)
   })
 
   it('affiche la capacité du salon', () => {
     render(<RoomList rooms={[room(1)]} error={null} searching={false} />)
     expect(screen.getByText(/1\/4 intervenants/)).toBeInTheDocument()
+  })
+})
+
+describe('RoomList : regarder en spectateur dès la liste', () => {
+  it('propose « Regarder en spectateur » (lien ?watch=1) tant que le salon accepte des spectateurs', () => {
+    render(<RoomList rooms={[room(1)]} error={null} searching={false} />)
+    expect(screen.getByRole('link', { name: /Regarder en spectateur/ })).toHaveAttribute('href', '#/arena/room1aaa?watch=1')
+  })
+
+  it('pas de lien si le créateur a interdit les spectateurs ou si le plafond est atteint', () => {
+    const rooms = [{ ...room(1), spectators_allowed: false }, { ...room(2), spectators: 20 }]
+    render(<RoomList rooms={rooms} error={null} searching={false} />)
+    expect(screen.queryByRole('link', { name: /Regarder en spectateur/ })).not.toBeInTheDocument()
   })
 })
