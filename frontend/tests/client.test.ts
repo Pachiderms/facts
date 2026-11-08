@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, apiBase, checkAssertion, createRoom, deleteRoom, isCheckResponse, listRooms, lookupRoom, roomsStatus, wsBase } from '../src/api/client'
+import { ApiError, apiBase, checkAssertion, createRoom, deleteRoom, isCheckResponse, listRooms, lookupRoom, reformulateTitle, roomsStatus, wsBase } from '../src/api/client'
 import type { CheckResponse } from '../src/api/types'
 
 const OK: CheckResponse = {
@@ -247,5 +247,38 @@ describe('deleteRoom', () => {
   it('propage le refus du serveur', async () => {
     fetchMock.mockResolvedValue(json({ detail: 'Salon non vide.' }, { status: 409 }))
     await expect(deleteRoom('aaaa2222')).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+describe('reformulateTitle', () => {
+  const GOOD = { title: 'Faut-il augmenter le SMIC à 1 700 € net ?', theme_category: 'social' }
+
+  it('envoie uniquement le sujet (aucun jeton) et renvoie la proposition', async () => {
+    fetchMock.mockResolvedValue(json(GOOD))
+    expect(await reformulateTitle('smic 1700')).toEqual(GOOD)
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toMatch(/\/rooms\/reformulate$/)
+    expect(JSON.parse(init.body)).toEqual({ title: 'smic 1700' })
+  })
+
+  it('un refus du serveur (sujet illégal) remonte avec sa raison', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Ce sujet incite à la haine.' }, { status: 422 }))
+    await expect(reformulateTitle('x')).rejects.toMatchObject({ status: 422, message: 'Ce sujet incite à la haine.' })
+  })
+
+  it('limite quotidienne : message du serveur', async () => {
+    fetchMock.mockResolvedValue(json({ detail: 'Limite quotidienne de reformulations atteinte.' }, { status: 429, headers: { 'retry-after': '60' } }))
+    await expect(reformulateTitle('x')).rejects.toMatchObject({ status: 429, retryAfter: 60 })
+  })
+
+  it.each([
+    ['thème inconnu', { ...GOOD, theme_category: 'admin' }],
+    ['titre trop court', { ...GOOD, title: 'Court ?' }],
+    ['titre trop long', { ...GOOD, title: 'x'.repeat(121) }],
+    ['titre absent', { theme_category: 'social' }],
+    ['pas un objet', ['x']],
+  ])('réponse hors contrat rejetée : %s', async (_n, body) => {
+    fetchMock.mockResolvedValue(json(body))
+    await expect(reformulateTitle('smic 1700')).rejects.toMatchObject({ status: 502 })
   })
 })

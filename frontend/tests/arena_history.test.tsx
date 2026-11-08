@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomSummary } from '../src/api/types'
 
-const api = vi.hoisted(() => ({ createRoom: vi.fn(), deleteRoom: vi.fn(), roomsStatus: vi.fn() }))
+const api = vi.hoisted(() => ({ createRoom: vi.fn(), deleteRoom: vi.fn(), roomsStatus: vi.fn(), reformulateTitle: vi.fn() }))
 vi.mock('../src/api/client', async (orig) => ({ ...(await orig<typeof import('../src/api/client')>()), ...api }))
 
 import { CreateRoomForm } from '../src/components/arena/CreateRoomForm'
@@ -30,6 +30,7 @@ beforeEach(() => {
   api.createRoom.mockReset()
   api.deleteRoom.mockReset()
   api.roomsStatus.mockReset()
+  api.reformulateTitle.mockReset()
   localStorage.clear()
   window.location.hash = ''
 })
@@ -145,5 +146,77 @@ describe('RoomList : filtre par thème et « Voir plus »', () => {
   it('affiche la capacité du salon', () => {
     render(<RoomList rooms={[room(1)]} error={null} searching={false} />)
     expect(screen.getByText(/1\/4 intervenants/)).toBeInTheDocument()
+  })
+})
+
+describe('CreateRoomForm : reformulation par l’IA', () => {
+  const SUGGESTION = { title: 'Faut-il augmenter le SMIC à 1 700 € net ?', theme_category: 'souverain' }
+  const type = (text: string) => userEvent.type(screen.getByLabelText(/Sujet du débat/i), text)
+
+  it('le bouton est inactif tant que le sujet est vide', () => {
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Proposer une reformulation' })).toBeDisabled()
+  })
+
+  it('affiche la proposition sans rien modifier ; « Utiliser » remplace le titre et le thème', async () => {
+    api.reformulateTitle.mockResolvedValue(SUGGESTION)
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('smic 1700 il faut')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    expect(await screen.findByText(SUGGESTION.title)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Sujet du débat/i)).toHaveValue('smic 1700 il faut') // pas appliquée d'office
+    await userEvent.click(screen.getByRole('button', { name: 'Utiliser cette question' }))
+    expect(screen.getByLabelText(/Sujet du débat/i)).toHaveValue(SUGGESTION.title)
+    expect(screen.getByLabelText('Thème')).toHaveValue('souverain')
+    expect(screen.queryByRole('status', { name: 'Proposition de reformulation' })).not.toBeInTheDocument()
+  })
+
+  it('« Garder mon titre » ferme la proposition et conserve la saisie', async () => {
+    api.reformulateTitle.mockResolvedValue(SUGGESTION)
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('smic 1700 il faut')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Garder mon titre' }))
+    expect(screen.getByLabelText(/Sujet du débat/i)).toHaveValue('smic 1700 il faut')
+    expect(screen.queryByText(SUGGESTION.title)).not.toBeInTheDocument()
+  })
+
+  it('un refus de l’IA est expliqué à l’utilisateur', async () => {
+    api.reformulateTitle.mockRejectedValue(new Error('Ce sujet cible des personnes ou incite à la haine.'))
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('sujet refusé')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('incite à la haine')
+  })
+
+  it('modifier le titre efface une proposition devenue obsolète', async () => {
+    api.reformulateTitle.mockResolvedValue(SUGGESTION)
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('smic 1700')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    await screen.findByText(SUGGESTION.title)
+    await type(' !')
+    expect(screen.queryByText(SUGGESTION.title)).not.toBeInTheDocument()
+  })
+
+  it('un seul appel à la fois (double clic)', async () => {
+    let resolve!: (v: unknown) => void
+    api.reformulateTitle.mockReturnValue(new Promise((r) => (resolve = r)))
+    render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('smic 1700')
+    const btn = screen.getByRole('button', { name: 'Proposer une reformulation' })
+    await userEvent.click(btn)
+    await userEvent.click(screen.getByRole('button', { name: 'Reformulation…' }), { pointerEventsCheck: 0 })
+    expect(api.reformulateTitle).toHaveBeenCalledTimes(1)
+    resolve(SUGGESTION)
+  })
+
+  it('le texte proposé est affiché comme du texte, jamais interprété comme du HTML', async () => {
+    api.reformulateTitle.mockResolvedValue({ title: 'Faut-il <img src=x onerror=alert(1)> réformer la fiscalité ?', theme_category: 'social' })
+    const { container } = render(<CreateRoomForm onCancel={vi.fn()} />)
+    await type('fiscalité')
+    await userEvent.click(screen.getByRole('button', { name: 'Proposer une reformulation' }))
+    await screen.findByText(/réformer la fiscalité/)
+    expect(container.querySelector('img')).toBeNull()
   })
 })

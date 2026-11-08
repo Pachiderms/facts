@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     max_rooms: int = 50
     room_idle_ttl_seconds: int = 1_800  # un salon non permanent, vide et inactif est supprimé
     daily_room_creation_limit: int = 3  # par visiteur et par jour
+    daily_reformulation_limit: int = 10  # appels LLM de reformulation, par visiteur et par jour
     room_title_min_chars: int = 10
     room_title_max_chars: int = 120
     room_code_max_failures: int = 5  # codes faux tolérés ...

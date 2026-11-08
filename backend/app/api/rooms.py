@@ -7,16 +7,19 @@ Protocole WebSocket (JSON) :
 """
 
 import asyncio
+import logging
 import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from app.adapters.llm import LLMError, LLMRateLimitError
 from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
 from app.core.config import Settings
 from app.core.identity import is_valid_token, participant_id
 from app.core.security import InvalidInputError, get_client_ip, looks_like_prompt_injection, sanitize_text
+from app.services.reformulation import ReformulationError, ReformulationRefused
 from app.services.rooms import (
     MAX_PARTICIPANTS,
     MIN_PARTICIPANTS,
@@ -29,6 +32,7 @@ from app.services.rooms import (
     TooManyRoomsError,
 )
 
+logger = logging.getLogger("facts.api")
 router = APIRouter(prefix="/api/v1", tags=["rooms"])
 
 ROOM_ID_RE = re.compile(r"[a-z0-9-]{1,64}")
@@ -100,6 +104,16 @@ class CreateRoomRequest(BaseModel):
         return v
 
 
+class ReformulateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(max_length=400)
+
+
+class Reformulated(BaseModel):
+    title: str
+    theme_category: str
+
+
 class CreatedRoom(BaseModel):
     id: str
     visibility: Literal["public", "private"]
@@ -158,6 +172,41 @@ async def lookup_room(request: Request, room_id: str):
     if room.requires_code():
         return RoomLookup(id=room.id, visibility="private", requires_code=True)
     return RoomLookup(id=room.id, visibility="public", requires_code=False, room=room.summary())
+
+
+@router.post("/rooms/reformulate", response_model=Reformulated, dependencies=[Depends(enforce_rate_limit)])
+async def reformulate_room_title(request: Request, body: ReformulateRequest):
+    """Propose une question neutre + un thème pour un sujet saisi. Un appel LLM, plafonné par jour."""
+    app = request.app
+    settings: Settings = app.state.settings
+    reformulator = app.state.reformulator
+    if reformulator is None:
+        raise HTTPException(status_code=503, detail="Reformulation indisponible.")
+    try:
+        sanitize_text(body.title, 400)
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None  # sans coût : avant le quota
+
+    ip = get_client_ip(request, settings.trust_proxy_headers)
+    limiter = app.state.daily_reformulation_limiter
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Limite quotidienne de reformulations atteinte. Saisissez votre titre directement.",
+            headers={"Retry-After": str(limiter.retry_after(ip))},
+        )
+    try:
+        result = await reformulator.reformulate(body.title)
+    except ReformulationRefused as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except LLMRateLimitError:
+        raise HTTPException(status_code=503, detail="Service momentanément saturé, réessayez plus tard.", headers={"Retry-After": "30"}) from None
+    except (LLMError, ReformulationError):
+        logger.warning("reformulation indisponible")
+        raise HTTPException(status_code=502, detail="La reformulation est momentanément indisponible.") from None
+    return Reformulated(title=result.title, theme_category=result.theme_category)
 
 
 @router.post("/rooms", response_model=CreatedRoom, status_code=201, dependencies=[Depends(enforce_rate_limit)])

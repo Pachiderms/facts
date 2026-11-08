@@ -1,5 +1,6 @@
 import { getParticipantToken } from '../lib/identity'
-import type { CheckResponse, CreatedRoom, CreateRoomInput, RoomLookup, RoomSummary, Verdict } from './types'
+import { CREATABLE_THEMES } from '../lib/presentation'
+import { ROOM_TITLE_MAX, ROOM_TITLE_MIN, type CheckResponse, type CreatedRoom, type CreateRoomInput, type RoomLookup, type RoomSummary, type Verdict } from './types'
 
 /** Erreur d'API déjà formulée en français pour l'utilisateur : jamais de détail technique. */
 export class ApiError extends Error {
@@ -193,6 +194,34 @@ export async function createRoom(input: CreateRoomInput, signal?: AbortSignal): 
     throw BAD_RESPONSE()
   }
   return data as unknown as CreatedRoom
+}
+
+export interface Reformulation {
+  title: string
+  theme_category: string
+}
+
+/** L'IA propose une question neutre et un thème. Un refus (sujet illégal, hors débat) arrive en 422 avec sa raison. */
+export async function reformulateTitle(title: string, signal?: AbortSignal): Promise<Reformulation> {
+  const response = await request(
+    '/api/v1/rooms/reformulate',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }), signal },
+    30_000,
+  )
+  if (!response.ok) throw await toApiError(response, 'Sujet invalide : saisissez entre 1 et 400 caractères.')
+  const data: unknown = await response.json().catch(() => null)
+  // La réponse est revalidée : thème dans la liste connue, titre de taille raisonnable.
+  if (
+    !isRecord(data) ||
+    typeof data.title !== 'string' ||
+    data.title.length < ROOM_TITLE_MIN ||
+    data.title.length > ROOM_TITLE_MAX ||
+    typeof data.theme_category !== 'string' ||
+    !(CREATABLE_THEMES as readonly string[]).includes(data.theme_category)
+  ) {
+    throw BAD_RESPONSE()
+  }
+  return { title: data.title, theme_category: data.theme_category }
 }
 
 /** Parmi ces salons (historique), lesquels existent encore ? Une seule requête pour toute la liste. */
