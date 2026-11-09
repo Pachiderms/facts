@@ -75,7 +75,7 @@ def test_list_rooms():
         rooms = c.get("/api/v1/rooms").json()
     assert [r["id"] for r in rooms] == ["room-1", "room-2", "room-3"]
     assert rooms[0]["trust_score"] is None and rooms[0]["message_count"] == 0  # pas d'historique fabriqué
-    assert set(rooms[0]) == {"id", "title", "category", "theme_category", "visibility", "max_participants", "spectators_allowed", "trust_score", "message_count", "participants", "spectators"}
+    assert set(rooms[0]) == {"id", "title", "category", "theme_category", "visibility", "max_participants", "spectators_allowed", "kick_threshold", "trust_score", "message_count", "participants", "spectators"}
 
 
 def test_list_rooms_is_rate_limited():

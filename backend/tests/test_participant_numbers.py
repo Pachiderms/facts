@@ -86,7 +86,7 @@ async def test_presence_lists_connected_numbers_not_seat_letters():
     b, _y = r.join(Sink().send, "b")
     c, _z = r.join(Sink().send, "c")
     await r.leave(b.id)
-    assert r._presence() == {"type": "presence", "present": [1, 3], "max_participants": 3, "spectators": 0}
+    assert r._presence() == {"type": "presence", "present": [1, 3], "max_participants": 3, "spectators": 0, "scores": {"1": None, "3": None}}
 
 
 async def test_snapshot_tells_each_viewer_their_own_number():
