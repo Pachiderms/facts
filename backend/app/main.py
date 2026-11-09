@@ -1,5 +1,6 @@
 """Point d'entrée : `uvicorn app.main:app`. La fabrique `create_app` sert aussi aux tests."""
 
+import time
 from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -132,9 +133,12 @@ def create_app(
             response.headers.setdefault(name, value)
         return response
 
+    app.state.started = time.monotonic()
+
     @app.get("/health", include_in_schema=False)
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> dict[str, str | int]:
+        # Durée depuis le démarrage : une valeur qui retombe à ~0 trahit un redémarrage (et donc des salons perdus).
+        return {"status": "ok", "uptime_seconds": int(time.monotonic() - app.state.started)}
 
     app.include_router(check_api.router)
     app.include_router(rooms_api.router)

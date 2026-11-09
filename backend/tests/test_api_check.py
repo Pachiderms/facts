@@ -64,7 +64,7 @@ def test_filter_defaults_to_true(client):
 
 
 def test_health(client):
-    assert client.get("/health").json() == {"status": "ok"}
+    assert client.get("/health").json()["status"] == "ok"
 
 
 # ---------- Validation d'entrée ----------

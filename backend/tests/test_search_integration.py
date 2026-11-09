@@ -47,7 +47,7 @@ async def test_pipeline_never_invents_a_verdict_when_all_search_is_down():
 def test_real_wiring_starts_and_stops_cleanly_without_network():
     settings = Settings(_env_file=None, llm_api_key="cle-de-test", search_providers="wikipedia,duckduckgo")
     with TestClient(create_app(settings)) as client:
-        assert client.get("/health").json() == {"status": "ok"}
+        assert client.get("/health").json()["status"] == "ok"
         assert client.app.state.service is not None
 
 
