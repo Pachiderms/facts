@@ -36,6 +36,28 @@ Dans Render, définir `FACTS_CORS_ORIGINS` = l'adresse **exacte** du site (`http
 - Une vérification d'affirmation renvoie un verdict.
 - Deux onglets dans un même salon : les messages arrivent en direct.
 
+## Garder l'API éveillée (optionnel, gratuit)
+
+Render met l'API en veille après 15 minutes sans trafic. Un pinger externe l'évite :
+
+1. Créer un compte gratuit sur **UptimeRobot** (uptimerobot.com).
+2. **Add New Monitor** → type *HTTP(s)* → URL `https://<votre-api>.onrender.com/health` → intervalle **5 minutes** (le plus court de l'offre gratuite ; le seuil de veille est de 15).
+3. Garder l'API comme **seul** service gratuit de votre espace Render : rester éveillée en continu consomme environ 744 h sur les 750 h offertes par mois (mois de 31 jours). À vérifier le premier mois dans le tableau de bord Render.
+
+À éviter : un cron GitHub Actions (exécutions souvent retardées, parfois au-delà de 15 minutes).
+
+Cela ne protège pas des **redémarrages** décidés par Render ni des redéploiements : les salons en mémoire sont alors perdus.
+
+## Repérer les redémarrages
+
+`/health` renvoie le temps écoulé depuis le démarrage :
+
+```json
+{"status": "ok", "uptime_seconds": 86412}
+```
+
+Dans UptimeRobot, la page de détail du moniteur permet de relire les réponses ; une valeur qui retombe près de 0 indique un redémarrage (donc des salons perdus) à ce moment-là. Rien d'autre n'est exposé par cette route.
+
 ## Pannes courantes
 - **« Failed to fetch » / salons qui ne chargent pas** : `FACTS_CORS_ORIGINS` ne correspond pas exactement à l'adresse du site.
 - **L'API ne démarre pas** : `FACTS_LLM_API_KEY` manquante (le journal Render le dit).

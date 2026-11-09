@@ -59,7 +59,7 @@ def test_prod_hides_interactive_docs_and_schema(prod_client):
 
 
 def test_prod_health_endpoint_for_the_platform_probe(prod_client):
-    assert prod_client.get("/health").json() == {"status": "ok"}
+    assert prod_client.get("/health").json()["status"] == "ok"
 
 
 def test_prod_cors_only_allows_the_deployed_front(prod_client):
@@ -77,3 +77,11 @@ def test_prod_websocket_refuses_foreign_or_missing_origin(prod_client):
         with pytest.raises(WebSocketDisconnect):
             with prod_client.websocket_connect(f"/api/v1/rooms/{room_id}/ws", headers=headers):
                 pass
+
+
+def test_health_reports_uptime_so_restarts_are_visible(prod_client):
+    first = prod_client.get("/health").json()
+    assert set(first) == {"status", "uptime_seconds"}  # rien d'autre n'est exposé
+    assert isinstance(first["uptime_seconds"], int) and first["uptime_seconds"] >= 0
+    prod_client.app.state.started -= 3600  # on simule une heure de fonctionnement
+    assert prod_client.get("/health").json()["uptime_seconds"] >= 3600
