@@ -26,7 +26,7 @@ export interface RoomState {
 }
 
 export interface ModerationWarning {
-  level: 'warning' | 'final_warning'
+  level: 'rephrase' | 'warning' | 'final_warning'
   strikes: number
   maxStrikes: number
   detail: string

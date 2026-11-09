@@ -191,3 +191,14 @@ describe('modération', () => {
     expect(s.reportNotice).toMatch(/impossible/)
   })
 })
+
+describe('modération : reformulation (vulgarité)', () => {
+  it('« rephrase » s’affiche comme invitation à reformuler, sans compter d’avertissement', () => {
+    const s = roomReducer(initialRoomState, {
+      type: 'server',
+      event: { type: 'moderation', level: 'rephrase', strikes: 1, max_strikes: 3, detail: 'Message non publié : merci de le reformuler sans vulgarité.' },
+    })
+    expect(s.warning?.level).toBe('rephrase')
+    expect(s.denied).toBeNull()
+  })
+})

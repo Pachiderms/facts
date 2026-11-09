@@ -151,3 +151,17 @@ Sanctions par identité (jeton), en mémoire, bornées : **1er message illégal 
 **Signalement** : `{"type": "report", "message_id": N}` (entier strict). Un signalement ne sanctionne jamais directement : il déclenche un second avis (filtre + LLM). Si illégal, le message est remplacé par « [Message retiré par la modération] » (`message_removed`, score de confiance recalculé) et son auteur reçoit un avertissement. Garde-fous : pas d'auto-signalement, un signalement par personne et par message, un seul appel LLM par message quel que soit le nombre de signalements, 20 signalements jugés par jour et par identité, indisponibilité du juge = réessai possible, jamais de retrait.
 
 Événements serveur ajoutés : `moderation` (`warning` | `final_warning` | `banned`), `message_removed`, `report_result` (`removed` | `kept` | `unavailable` | `duplicate` | `own` | `unknown`, envoyé au seul signaleur).
+
+### Dictionnaire de modération (PR C2)
+
+Les termes vivent dans `app/services/moderation_terms.py` (données, séparées de la logique) et sont testés par un **corpus de référence** (`tests/test_moderation_terms.py`) : phrases à refuser *et* phrases légitimes qui ne doivent jamais l'être.
+
+| Niveau | Effet | Exemples |
+|---|---|---|
+| STRIKE | refusé **et compté** (avertissement → dernier avertissement → exclusion 1 h) | insultes directes, `vtf`, `ntm`, `fdp`, racisme, homophobie, menaces, `kys` |
+| REPHRASE | refusé **sans avertissement compté** : « reformulez sans vulgarité » (`level: "rephrase"`) | « c'est de la merde », putain, bordel, bullshit |
+| SUSPECT | tranché par le juge IA | « idiot », `tg`, « You're trash », NPC, mongol |
+
+Texte normalisé avant comparaison : accents, leetspeak (`p3d@le`, seulement dans les mots mêlant lettres et chiffres, jamais « 2024 »), ponctuation (`f.d.p`), lettres espacées (`k y s`), répétitions (`connaaard`). Limites de mots partout : aucune recherche de sous-chaîne. **Volontairement absents** (sens légitime en débat) : SDF, PD, shit, ratio, gap, cancer, tard, retard, fac, Niger, argot de jeu vidéo. Mots à double sens : `FDP` (parti allemand/suisse → l'IA tranche), `pointeur` (laser, souris, badgeuse → autorisé ; sinon insulte).
+
+Correctif du juge IA : la réponse était limitée à 60 jetons ; un modèle « raisonneur » (gpt-oss) les consommait en réflexion et la réponse sortait vide (« réponse invalide », donc « Signalement impossible »). Désormais 400 jetons, un nouvel essai, et la cause est journalisée.
