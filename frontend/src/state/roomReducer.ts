@@ -1,5 +1,5 @@
 import type { SocketStatus } from '../api/socket'
-import { REPORT_OUTCOMES, type MessageCheck, type Presence, type Role, type RoomMessage, type RoomSummary, type ServerEvent } from '../api/types'
+import { REPORT_OUTCOMES, type KickVote, type MessageCheck, type Presence, type Role, type RoomMessage, type RoomSummary, type ServerEvent } from '../api/types'
 
 /** Plafond local : le serveur borne déjà l'historique, on borne aussi l'affichage. */
 export const MAX_MESSAGES = 500
@@ -25,6 +25,12 @@ export interface RoomState {
   warning: ModerationWarning | null
   /** Réponse à un signalement, effaçable. */
   reportNotice: string | null
+  /** Vote d'exclusion en cours. */
+  kickVote: KickVote | null
+  /** J'ai déjà voté sur le vote en cours (le serveur refuse un second vote). */
+  voted: boolean
+  /** Issue d'un vote d'exclusion, effaçable. */
+  kickNotice: string | null
 }
 
 export interface ModerationWarning {
@@ -43,8 +49,15 @@ const REPORT_TEXT: Record<string, string> = {
   unknown: 'Ce message n’existe plus.',
 }
 
-export type DeniedReason = 'invalid_code' | 'too_many_attempts' | 'session_replaced' | 'spectators_not_allowed' | 'room_deleted' | 'banned'
-const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 'session_replaced', 'spectators_not_allowed', 'room_deleted', 'banned']
+export type DeniedReason =
+  | 'invalid_code'
+  | 'too_many_attempts'
+  | 'session_replaced'
+  | 'spectators_not_allowed'
+  | 'room_deleted'
+  | 'banned'
+  | 'kicked'
+const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 'session_replaced', 'spectators_not_allowed', 'room_deleted', 'banned', 'kicked']
 
 export const initialRoomState: RoomState = {
   status: 'connecting',
@@ -60,6 +73,9 @@ export const initialRoomState: RoomState = {
   warning: null,
   reportNotice: null,
   banRetryAfter: null,
+  kickVote: null,
+  voted: false,
+  kickNotice: null,
 }
 
 export type RoomAction =
@@ -68,7 +84,33 @@ export type RoomAction =
   | { type: 'dismiss_notice' }
   | { type: 'dismiss_warning' }
   | { type: 'dismiss_report_notice' }
+  | { type: 'dismiss_kick_notice' }
+  | { type: 'voted' }
   | { type: 'reset' }
+
+function kickText(outcome: string, target: number, you: number | null): string | null {
+  const who = target === you ? 'Vous' : `Participant ${target}`
+  if (outcome === 'kicked') return `${who} ${target === you ? 'avez été exclu' : 'a été exclu'} du salon.`
+  if (outcome === 'kept') return `Le vote n’a pas abouti : ${who === 'Vous' ? 'vous restez' : `${who} reste`} dans le salon.`
+  if (outcome === 'cancelled') return 'Le vote d’exclusion a été annulé.'
+  return null
+}
+
+/** Valide un vote reçu : le serveur n'est pas cru sur parole pour l'affichage (nombres entiers bornés). */
+function validVote(raw: unknown): KickVote | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const v = raw as Record<string, unknown>
+  const ints = ['target', 'score', 'threshold', 'yes', 'no', 'ends_in', 'voters'] as const
+  if (!ints.every((k) => Number.isInteger(v[k]) && (v[k] as number) >= 0)) return null
+  return { target: v.target, score: v.score, threshold: v.threshold, yes: v.yes, no: v.no, ends_in: v.ends_in, voters: v.voters } as KickVote
+}
+
+function cleanScores(raw: unknown): Record<string, number | null> {
+  if (typeof raw !== 'object' || raw === null) return {}
+  const out: Record<string, number | null> = {}
+  for (const [k, v] of Object.entries(raw)) if (/^\d+$/.test(k) && (v === null || (typeof v === 'number' && Number.isFinite(v)))) out[k] = v
+  return out
+}
 
 function withCheck(messages: RoomMessage[], id: number, check: MessageCheck): RoomMessage[] {
   return messages.map((m) => (m.id === id ? { ...m, check } : m))
@@ -84,6 +126,10 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
       return { ...state, warning: null }
     case 'dismiss_report_notice':
       return { ...state, reportNotice: null }
+    case 'dismiss_kick_notice':
+      return { ...state, kickNotice: null }
+    case 'voted':
+      return { ...state, voted: true }
     case 'status':
       return { ...state, status: action.status }
     case 'server': {
@@ -99,6 +145,9 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
             messages: event.messages.slice(-MAX_MESSAGES),
             trustScore: event.room.trust_score,
             deltas: {},
+            kickVote: validVote(event.kick_vote),
+            voted: false, // le serveur refuse un second vote : au pire, une erreur claire
+            presence: state.presence ? { ...state.presence, scores: cleanScores(event.scores) } : state.presence,
           }
         case 'presence':
           return {
@@ -107,6 +156,7 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
               present: Array.isArray(event.present) ? event.present.filter((n): n is number => Number.isInteger(n)) : [],
               max_participants: event.max_participants,
               spectators: event.spectators,
+              scores: cleanScores(event.scores),
             },
           }
         case 'message': {
@@ -145,6 +195,21 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
           }
         case 'report_result':
           return { ...state, reportNotice: REPORT_TEXT[REPORT_OUTCOMES.includes(event.outcome) ? event.outcome : 'unavailable'] ?? null }
+        case 'kick_vote': {
+          const vote = validVote(event)
+          if (vote === null) return state
+          return { ...state, kickVote: vote, voted: state.kickVote?.target === vote.target ? state.voted : false }
+        }
+        case 'kick_result':
+          return { ...state, kickVote: null, voted: false, kickNotice: kickText(event.outcome, event.target, state.you) }
+        case 'role':
+          return {
+            ...state,
+            role: event.role,
+            you: Number.isInteger(event.you) ? (event.you as number) : null,
+            kickVote: null,
+            voted: false,
+          }
         case 'error':
           if (DENIED_CODES.includes(event.code)) {
             return {

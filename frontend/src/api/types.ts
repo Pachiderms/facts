@@ -32,6 +32,8 @@ export interface RoomSummary {
   visibility: 'public' | 'private'
   max_participants: number
   spectators_allowed: boolean
+  /** Score individuel (en dessous) à partir duquel le créateur peut proposer une exclusion. */
+  kick_threshold?: number
   /** Dans le snapshot : vrai pour le créateur du salon (il peut le supprimer s'il est vide). */
   is_owner?: boolean
   /** Présent uniquement dans le snapshot envoyé au PROPRIÉTAIRE d'un salon privé. */
@@ -59,6 +61,7 @@ export interface CreateRoomInput {
   visibility: Visibility
   max_participants: number
   spectators_allowed: boolean
+  kick_threshold?: number
 }
 
 export interface CreatedRoom {
@@ -73,6 +76,8 @@ export type Role = Seat | 'spectator'
 export const isSeat = (value: unknown): value is Seat => SEAT_LETTERS.includes(value as Seat)
 export const PARTICIPANTS_MIN = 2
 export const PARTICIPANTS_MAX = 6
+export const KICK_THRESHOLDS = [20, 25, 30, 35, 40] as const
+export const KICK_THRESHOLD_DEFAULT = 30
 export type BadgeType = 'green' | 'amber' | 'red' | 'gray'
 export type CheckStatus =
   | 'pending'
@@ -109,11 +114,36 @@ export interface Presence {
   present: number[]
   max_participants: number
   spectators: number
+  /** Score individuel (0-100) des connectés, par numéro ; `null` tant qu'il y a moins de 3 messages vérifiés. */
+  scores?: Record<string, number | null>
 }
+
+/** Vote d'exclusion en cours (les identités des votants ne sont jamais transmises). */
+export interface KickVote {
+  target: number
+  score: number
+  threshold: number
+  yes: number
+  no: number
+  /** Secondes restantes au moment de l'envoi. */
+  ends_in: number
+  /** Nombre de spectateurs pouvant voter. */
+  voters: number
+}
+
+export type KickOutcome = 'kicked' | 'kept' | 'cancelled'
 
 /** Événements serveur -> client sur le WebSocket d'un salon. */
 export type ServerEvent =
-  | { type: 'snapshot'; role: Role; you?: number | null; room: RoomSummary; messages: RoomMessage[] }
+  | {
+      type: 'snapshot'
+      role: Role
+      you?: number | null
+      room: RoomSummary
+      messages: RoomMessage[]
+      kick_vote?: (Omit<KickVote, never> & { type?: 'kick_vote' }) | null
+      scores?: Record<string, number | null>
+    }
   | ({ type: 'presence' } & Presence)
   | { type: 'message'; message: RoomMessage; trust_score: number | null }
   | {
@@ -134,6 +164,9 @@ export type ServerEvent =
     }
   | { type: 'message_removed'; message_id: number; text: string; trust_score: number | null; trust_delta: number }
   | { type: 'report_result'; message_id: number; outcome: ReportOutcome }
+  | ({ type: 'kick_vote' } & KickVote)
+  | { type: 'kick_result'; target: number; outcome: KickOutcome }
+  | { type: 'role'; role: Role; you: number | null }
 
 export type ReportOutcome = 'removed' | 'kept' | 'unavailable' | 'duplicate' | 'own' | 'unknown'
 export const REPORT_OUTCOMES: readonly ReportOutcome[] = ['removed', 'kept', 'unavailable', 'duplicate', 'own', 'unknown']

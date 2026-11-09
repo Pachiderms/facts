@@ -14,7 +14,7 @@ const MAX_DELAY_MS = 30_000
 /** 1013 : « réessayez plus tard » (salon ou IP saturés) : on temporise davantage. */
 const BUSY_MIN_DELAY_MS = 10_000
 
-const EVENT_TYPES = new Set(['snapshot', 'presence', 'message', 'check_result', 'error', 'moderation', 'message_removed', 'report_result'])
+const EVENT_TYPES = new Set(['snapshot', 'presence', 'message', 'check_result', 'error', 'moderation', 'message_removed', 'report_result', 'kick_vote', 'kick_result', 'role'])
 
 /** Décode un événement serveur ; retourne `null` si la trame est invalide (ignorée). */
 export function parseServerEvent(raw: unknown): ServerEvent | null {
@@ -114,6 +114,27 @@ export class RoomSocket {
   report(messageId: number): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) return false
     this.ws.send(JSON.stringify({ type: 'report', message_id: messageId }))
+    return true
+  }
+
+  /** Créateur : propose d'exclure un participant (le serveur vérifie score, seuil et droits). */
+  kick(target: number): boolean {
+    return this.sendJson({ type: 'kick', target })
+  }
+
+  /** Spectateur : vote pour (`true`) ou contre l'exclusion en cours. Un seul vote par personne. */
+  vote(approve: boolean): boolean {
+    return this.sendJson({ type: 'vote', approve })
+  }
+
+  /** Spectateur : prend une place d'intervenant libre (premier arrivé, premier servi). */
+  takeSeat(): boolean {
+    return this.sendJson({ type: 'take_seat' })
+  }
+
+  private sendJson(payload: object): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify(payload))
     return true
   }
 
