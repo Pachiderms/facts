@@ -36,7 +36,7 @@ interface Props {
 /** Un salon. Monté avec une `key` : changer de salon ou de code ferme proprement l'ancienne connexion. */
 export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spectate = false }: Props) {
   const {
-    status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
+    status, role, you, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
     warning, reportNotice, banRetryAfter, report, dismissWarning, dismissReportNotice,
   } = useRoom(roomId, code, spectate)
   const info = room ?? fallback
@@ -179,8 +179,8 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
             </span>
             {presence && (
               <span className="text-[11px] text-neutral-500">
-                Intervenants : {presence.seats.length}/{presence.max_participants}
-                {presence.seats.length > 0 && ` (${presence.seats.join(', ')})`}
+                Intervenants : {presence.present.length}/{presence.max_participants}
+                {presence.present.length > 0 && ` (n° ${presence.present.join(', ')})`}
                 {presence.spectators > 0 && ` · ${presence.spectators} spectateur${presence.spectators > 1 ? 's' : ''}`}
               </span>
             )}
@@ -202,11 +202,22 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
       {warning && (
         <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
           <span>
-            <strong className="font-extrabold">
-              {warning.level === 'final_warning' ? 'Dernier avertissement' : 'Avertissement'} ({warning.strikes}/{warning.maxStrikes})
-            </strong>
-            {' · '}
-            {warning.detail} Votre message n’a pas été publié.
+            {warning.level === 'rephrase' ? (
+              // Vulgarité : simple invitation à reformuler, aucun avertissement compté.
+              <>
+                <strong className="font-extrabold">Message non publié</strong>
+                {' · '}
+                {warning.detail}
+              </>
+            ) : (
+              <>
+                <strong className="font-extrabold">
+                  {warning.level === 'final_warning' ? 'Dernier avertissement' : 'Avertissement'} ({warning.strikes}/{warning.maxStrikes})
+                </strong>
+                {' · '}
+                {warning.detail} Votre message n’a pas été publié.
+              </>
+            )}
           </span>
           <button type="button" onClick={dismissWarning} aria-label="Fermer l’avertissement" className="shrink-0 rounded p-0.5 hover:bg-amber-100">
             <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -248,13 +259,16 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
               message={m}
               delta={deltas[m.id]}
               alternate={(info?.max_participants ?? 2) === 2}
-              onReport={m.speaker !== role ? report : undefined}
+              mine={you !== null && m.speaker === you}
+              viewerIsSpectator={role === 'spectator'}
+              absent={presence !== null && !presence.present.includes(m.speaker)}
+              onReport={you === null || m.speaker !== you ? report : undefined}
             />
           ))
         )}
       </ul>
 
-      <Composer role={role} status={status} onSend={send} />
+      <Composer role={role} number={you} status={status} onSend={send} />
     </div>
   )
 }

@@ -40,7 +40,7 @@ FINE = {"illegal": False, "category": "autre"}
         ("Quel connard !", "insulte"),
         ("Quel connaaaard", "insulte"),
         ("c0nnard", "insulte"),
-        ("C.O.N.N.A.R.D ?", None),  # lettres espacées : hors portée du filtre local (le LLM n'est pas appelé non plus)
+        ("C.O.N.N.A.R.D ?", "insulte"),  # lettres espacées recollées
         ("Ta gueule", "insulte"),
         ("Je vais te tuer", "menace"),
         ("On va vous buter", "menace"),
@@ -54,10 +54,7 @@ FINE = {"illegal": False, "category": "autre"}
 )
 def test_clear_violations_are_blocked_locally(text, category):
     result = local_filter(text)
-    if category is None:
-        assert result.verdict != "block"
-    else:
-        assert (result.verdict, result.category) == ("block", category)
+    assert (result.verdict, result.category) == ("block", category)
 
 
 @pytest.mark.parametrize(
@@ -88,8 +85,11 @@ def test_plain_messages_cost_nothing():
 
 
 def test_normalize_defeats_accents_leetspeak_and_repetitions():
-    assert normalize("ÉNCULÉÉÉ !!") == "encule"
-    assert normalize("c0nn@rd") == "conard"
+    assert normalize("ÉNCULÉ !!") == "encule"
+    assert normalize("c0nn@rd") == "connard"
+    assert normalize("f.d.p") == "fdp"
+    assert normalize("K y S") == "kys"
+    assert normalize("Budget 2024 : 1984") == "budget"  # les nombres seuls disparaissent, jamais de leetspeak
 
 
 # ====================== juge ======================
@@ -469,3 +469,87 @@ def test_ws_report_review_quota_protects_the_llm():
             outcomes.append(recv_until(reporter, "report_result")["outcome"])
         assert outcomes == ["kept", "kept", "unavailable", "unavailable"]
     assert len(llm.calls) == 2
+
+
+# ====================== correctifs : juge IA fiable, vulgarité sans avertissement ======================
+class RecordingLLM(FakeLLM):
+    async def complete(self, system, user, *, json_mode=False, max_tokens=1200, temperature=0.0):
+        self.max_tokens = max_tokens
+        return await super().complete(system, user, json_mode=json_mode, max_tokens=max_tokens, temperature=temperature)
+
+
+async def test_judge_leaves_room_for_reasoning_models():
+    # Régression : avec 60 jetons, gpt-oss « réfléchissait » tout son budget et la réponse sortait vide.
+    llm = RecordingLLM(ILLEGAL)
+    await Moderator(llm).review_reported("Un message anodin pour le filtre")
+    assert llm.max_tokens >= 300
+
+
+async def test_judge_retries_once_on_an_invalid_answer():
+    llm = FakeLLM("", ILLEGAL)  # 1re réponse vide (budget épuisé), 2e valide
+    verdict = await Moderator(llm).review_reported("Un message anodin pour le filtre")
+    assert verdict is not None and not verdict.allowed and len(llm.calls) == 2
+
+
+async def test_judge_gives_up_after_two_invalid_answers_without_blocking_anyone():
+    llm = FakeLLM("", "")
+    assert await Moderator(llm).review_reported("Un message anodin pour le filtre") is None
+    assert len(llm.calls) == 2
+    assert (await Moderator(FakeLLM("", "")).review("Les politiques sont des idiots")).allowed
+
+
+async def test_vulgarity_is_refused_without_a_strike_and_without_the_llm():
+    llm = FakeLLM(FINE)
+    verdict = await Moderator(llm).review("C'est de la merde")
+    assert not verdict.allowed and verdict.strike is False and verdict.category == "vulgarite"
+    assert "reformuler" in verdict.message and llm.calls == []
+
+
+async def test_room_vulgarity_asks_to_rephrase_and_never_counts_a_strike():
+    room, moderator = moderated_room()
+    sink = Sink()
+    a, _x = room.join(sink.send, "a")
+    for _ in range(5):
+        assert await room.post_message(a, "Putain c'est n'importe quoi") is None
+    events = sink.of("moderation")
+    assert len(events) == 5 and all(e["level"] == "rephrase" and "reformuler" in e["detail"] for e in events)
+    assert moderator.ledger.strikes("a") == 0 and not room.is_banned(a)
+    assert list(room.messages) == []
+    # un vrai message illégal compte toujours depuis zéro
+    await room.post_message(a, "Quel connard")
+    assert sink.of("moderation")[-1]["level"] == "warning" and sink.of("moderation")[-1]["strikes"] == 1
+
+
+async def test_report_of_a_vulgar_message_never_removes_or_strikes():
+    # Un message vulgaire ne peut pas être publié ; un message limite l'est, puis jugé par l'IA si on le signale.
+    room, moderator = moderated_room(FakeLLM(FINE))
+    _a, _s, message = await posted(room, "a", "Je ne suis pas d'accord du tout")
+    reporter, _x = room.join(Sink().send, "b")
+    assert await room.report(reporter, message["id"]) == "kept"
+    assert moderator.ledger.strikes("a") == 0
+
+
+async def test_dictionary_catches_the_abbreviations_seen_in_production():
+    room, _ = moderated_room()
+    sink = Sink()
+    a, _x = room.join(sink.send, "a")
+    assert await room.post_message(a, "vtf") is None
+    assert sink.of("moderation")[0]["level"] == "warning"
+
+
+async def test_political_party_named_fdp_is_judged_not_blocked():
+    room, moderator = moderated_room(FakeLLM(FINE))
+    sink = Sink()
+    a, _x = room.join(sink.send, "a")
+    assert await room.post_message(a, "La FDP allemande refuse le budget") is not None
+    assert sink.of("moderation") == [] and moderator.ledger.strikes("a") == 0
+
+
+def test_ws_vulgar_message_gets_a_rephrase_notice():
+    with ws_client() as c, connect(c, "room-1", 81) as ws:
+        recv_until(ws, "snapshot")
+        ws.send_json({"type": "message", "text": "C'est de la merde"})
+        event = recv_until(ws, "moderation")
+        assert event["level"] == "rephrase" and "reformuler" in event["detail"]
+        ws.send_json({"type": "message", "text": "Je ne suis pas d'accord avec cette analyse."})
+        assert recv_until(ws, "message")["message"]["text"].startswith("Je ne suis pas")

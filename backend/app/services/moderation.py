@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.adapters.llm import LLMError, LLMProvider, parse_json_object
 from app.core.security import looks_like_prompt_injection
+from app.services import moderation_terms as terms
 
 logger = logging.getLogger("facts.moderation")
 
@@ -41,72 +42,81 @@ CATEGORY_MESSAGES: dict[str, str] = {
     "insulte": "Les insultes sont interdites : attaquez les arguments, pas les personnes.",
     "menace": "Les menaces et appels à la violence sont interdits.",
     "harcelement": "Le harcèlement est interdit.",
+    "vulgarite": "Message non publié : merci de le reformuler sans vulgarité.",
     "autre": "Ce message enfreint les règles du salon.",
 }
 REMOVED_TEXT = "[Message retiré par la modération]"
 
 MAX_STRIKES = 3
+ATTEMPTS = 2
+LLM_MAX_TOKENS = 400
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
 
 
+def _leet(token: str) -> str:
+    """Défait le leetspeak seulement dans les mots mêlant lettres et chiffres/symboles (jamais « 2024 »)."""
+    has_letter = any(c.isalpha() for c in token)
+    has_symbol = any(c in "013457@$!" for c in token)
+    if not (has_letter and has_symbol):
+        return token
+    token = re.sub(r"(?<=[a-z])!(?=[a-z])", "i", token)  # « b!tch », mais jamais « idiot ! »
+    return token.translate(_LEET)
+
+
 def normalize(text: str) -> str:
-    """Minuscules, sans accents ni ponctuation, leetspeak courant défait, lettres répétées réduites."""
+    """Minuscules, sans accents ni ponctuation, leetspeak défait, lettres isolées recollées.
+
+    Les lettres répétées ne sont PAS réduites ici (« Niger » ne doit jamais devenir « niger » ≈ « nigger ») :
+    ce sont les motifs du dictionnaire qui tolèrent les répétitions.
+    """
     decomposed = unicodedata.normalize("NFKD", text.casefold())
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    stripped = stripped.translate(_LEET)
+    stripped = " ".join(_leet(tok) for tok in stripped.split())
     stripped = re.sub(r"[^a-z\s]", " ", stripped)
-    stripped = re.sub(r"([a-z])\1+", r"\1", stripped)  # « connaaard » -> « conard »
-    return re.sub(r"\s+", " ", stripped).strip()
+    tokens = stripped.split()
+    out: list[str] = []
+    run: list[str] = []
+    for tok in tokens + [""]:  # sentinelle pour vider la dernière série
+        if len(tok) == 1:
+            run.append(tok)
+            continue
+        if len(run) >= 3:  # « f d p », « k y s » : au moins 3 lettres isolées d'affilée
+            out.append("".join(run))
+        else:
+            out.extend(run)
+        run = []
+        if tok:
+            out.append(tok)
+    return " ".join(out)
 
 
-# Les motifs sont écrits sur la forme NORMALISÉE (lettres doublées réduites : connard -> conard).
-_BLOCK: dict[str, tuple[str, ...]] = {
-    "menace": (
-        r"\bje (vais|vas|va) (te|vous|le|la|les) (tuer|buter|crever|masacrer|egorger|fumer|violer)\b",
-        r"\bon va (te|vous|le|la|les) (tuer|buter|crever|masacrer|egorger|violer)\b",
-        r"\b(il faut|faut) (tous )?(les |le |la )?(tuer|exterminer|gazer|egorger|pendre)\b",
-        r"\bmort aux? (arabes|noirs|juifs|musulmans|roms|migrants|immigres|etrangers|gays|homos|blancs|flics|journalistes|politiques|riches|pauvres)\b",
-        r"\b(va|vas|allez|allez vous) (creve|crever)\b",
-    ),
-    "racisme": (
-        r"\bsales? (arabes?|noirs?|juifs?|blancs?|negres?|bougnoules?|chinetoques?|roms?|musulmans?)\b",
-        r"\b(bougnoule|bougnoules|youpin|youpins|chinetoque|chinetoques|bamboula|sale race)\b",
-        r"\bretourne[zs]? (dans ton|dans votre|chez toi|chez vous)\b",
-    ),
-    "insulte": (
-        r"\b(conard|conasse|salope|salop|pute|encule|enculee|fdp|ntm)\b",
-        r"\bfils? de (pute|chien)\b",
-        r"\b(ta|ferme ta|ferme la) gueule\b",
-        r"\bva te faire (foutre|enculer)\b",
-    ),
-    "haine": (
-        r"\b(pede|gouine|tafiole)\b",
-        r"\b(ces|les|tous les) (arabes|noirs|juifs|musulmans|roms|migrants|immigres|gays|homos|trans) (sont des?|doivent|meritent)\b.{0,40}\b(animaux|vermines?|parasites?|rats?|mourir|crever|disparaitre|degager|deporter)\b",
-    ),
-}
-# Mots ambigus : un débat peut les citer ou les employer sans haine. Le LLM tranche.
-_SUSPECT = (
-    r"\b(cons?|connes?|idiots?|idiotes?|debiles?|imbeciles?|abrutis?|abruties?|stupides?|ordures?|degage|degagez|vermines?|parasites?|racailles?|tares?|minables?|cretins?|cretines?|batards?|batardes?|merdeux|merdeuses?|negres?|negresses?|ratons?|tapettes?|pedales?)\b",
-    r"\b(race|races|inferieure?s?|sous hommes?|grand remplacement)\b",
-    r"\b(ces|les|tous les) (arabes|noirs|juifs|musulmans|roms|migrants|immigres|blancs|gays|homos|trans|francais de souche) (sont|ne|doivent|veulent)\b",
-    r"\b(je te|je vous|on va te|on va vous) (retrouve|retrouverai|retrouvera|trouve|trouverai|detruire|detruirai|casser|casserai)\b",
-    r"\b(tu|vous) (merites?|meritez) (de )?(mourir|crever|souffrir)\b",
-)
-_BLOCK_RE = {cat: [re.compile(p) for p in patterns] for cat, patterns in _BLOCK.items()}
-_SUSPECT_RE = [re.compile(p) for p in _SUSPECT]
+_STRIKE_RE = {cat: [re.compile(p) for p in patterns] for cat, patterns in terms.STRIKE.items()}
+_REPHRASE_RE = [re.compile(p) for p in terms.REPHRASE]
+_SUSPECT_RE = [re.compile(p) for p in terms.SUSPECT]
+_AMBIGUOUS = [(re.compile(p), re.compile(ctx), cat, with_ctx) for p, ctx, cat, with_ctx in terms.AMBIGUOUS]
 
 
 @dataclass(frozen=True)
 class LocalResult:
-    verdict: Literal["block", "suspect", "ok"]
+    verdict: Literal["block", "rephrase", "suspect", "ok"]
     category: str | None = None
 
 
 def local_filter(text: str) -> LocalResult:
     norm = normalize(text)
-    for category, patterns in _BLOCK_RE.items():
+    for category, patterns in _STRIKE_RE.items():
         if any(p.search(norm) for p in patterns):
             return LocalResult("block", category)
+    for pattern, context, category, with_context in _AMBIGUOUS:
+        if pattern.search(norm):
+            # Sans contexte : insulte. Avec un contexte légitime (« la FDP allemande », « pointeur laser ») :
+            # autorisé, ou confié au juge IA.
+            if not context.search(norm):
+                return LocalResult("block", category)
+            if with_context == "suspect":
+                return LocalResult("suspect")
+    if any(p.search(norm) for p in _REPHRASE_RE):
+        return LocalResult("rephrase", "vulgarite")
     if any(p.search(norm) for p in _SUSPECT_RE):
         return LocalResult("suspect")
     return LocalResult("ok")
@@ -117,6 +127,7 @@ class Verdict:
     allowed: bool
     category: str | None = None
     source: Literal["local", "llm", "none"] = "none"
+    strike: bool = True  # False : refusé sans avertissement compté (simple invitation à reformuler)
 
     @property
     def message(self) -> str:
@@ -206,7 +217,7 @@ class Moderator:
         llm: LLMProvider | None,
         ledger: ModerationLedger | None = None,
         *,
-        timeout_seconds: float = 8.0,
+        timeout_seconds: float = 10.0,
     ) -> None:
         self._llm, self.ledger, self._timeout = llm, ledger or ModerationLedger(), timeout_seconds
 
@@ -215,6 +226,8 @@ class Moderator:
         local = local_filter(text)
         if local.verdict == "block":
             return Verdict(False, local.category, "local")
+        if local.verdict == "rephrase":
+            return Verdict(False, local.category, "local", strike=False)
         if local.verdict == "ok":
             return ALLOWED
         verdict = await self._ask_llm(text)
@@ -233,14 +246,23 @@ class Moderator:
             # sans appel, donc laissé passer ; la tentative est sans effet.
             return None
         user_prompt = f"<MESSAGE>\n{text}\n</MESSAGE>"
-        try:
-            raw = await asyncio.wait_for(
-                self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=60, temperature=0.0),
-                self._timeout,
-            )
-            out = _LLMVerdict.model_validate(parse_json_object(raw))
-        except (LLMError, ValidationError, asyncio.TimeoutError, json.JSONDecodeError):
-            logger.warning("modération LLM indisponible ou réponse invalide")
+        out: _LLMVerdict | None = None
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                # Marge pour la « réflexion » des modèles raisonneurs (gpt-oss) : avec 60 jetons la réponse
+                # sortait vide ou coupée, donc invalide.
+                raw = await asyncio.wait_for(
+                    self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=LLM_MAX_TOKENS, temperature=0.0),
+                    self._timeout,
+                )
+                out = _LLMVerdict.model_validate(parse_json_object(raw))
+                break
+            except asyncio.TimeoutError:
+                logger.warning("modération LLM : délai dépassé")
+                return None  # inutile de réessayer un service lent
+            except (LLMError, ValidationError, json.JSONDecodeError) as exc:
+                logger.warning("modération LLM : réponse invalide ou indisponible (%s, essai %d/%d)", type(exc).__name__, attempt, ATTEMPTS)
+        if out is None:
             return None
         if not out.illegal:
             return ALLOWED

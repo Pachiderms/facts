@@ -69,6 +69,7 @@ ID_LENGTH, CODE_LENGTH = 8, 6
 SEAT_LETTERS = "ABCDEF"  # un siège par lettre : de 2 à 6 intervenants par salon
 MIN_PARTICIPANTS, MAX_PARTICIPANTS = 2, len(SEAT_LETTERS)
 MAX_SPECTATORS = 20
+MAX_REMEMBERED_PARTICIPANTS = 500  # mémoire bornée dans un salon permanent
 
 
 @dataclass
@@ -77,6 +78,7 @@ class Client:
     role: str  # une lettre de siège ("A"...) ou "spectator" : attribué par le SERVEUR, jamais choisi par le client
     send: SendFn
     participant_id: str = ""
+    number: int | None = None  # « Participant N » : stable pour toute la vie du salon ; None pour un spectateur
     close: Callable[[], Awaitable[None]] | None = field(default=None, repr=False)
 
 
@@ -132,6 +134,9 @@ class Room:
         self.total_messages = 0
         self._next_id = 0
         self._tasks: set[asyncio.Task] = set()
+        # Numéro de chaque personne (par identité) : un siège (A, B…) se libère et se réattribue, pas un numéro.
+        self._numbers: dict[str, int] = {}
+        self._next_number = 0
 
     # ---------- état ----------
     @property
@@ -142,7 +147,7 @@ class Room:
         roles = [c.role for c in self.clients.values()]
         return {
             "type": "presence",
-            "seats": [seat for seat in self.seats if seat in roles],  # sièges occupés, dans l'ordre
+            "present": sorted(c.number for c in self.clients.values() if c.number is not None),  # numéros connectés
             "max_participants": self.max_participants,
             "spectators": roles.count("spectator"),
         }
@@ -163,12 +168,23 @@ class Room:
             "spectators": roles.count("spectator"),
         }
 
-    def snapshot(self, role: str, participant: str = "") -> dict[str, Any]:
+    def _number_for(self, pid: str) -> int:
+        """Numéro stable de cette identité dans ce salon (attribué à la première prise de siège)."""
+        number = self._numbers.get(pid)
+        if number is None:
+            self._next_number += 1
+            number = self._next_number
+            if len(self._numbers) < MAX_REMEMBERED_PARTICIPANTS:
+                self._numbers[pid] = number
+        return number
+
+    def snapshot(self, role: str, participant: str = "", number: int | None = None) -> dict[str, Any]:
         room = self.summary()
         room["is_owner"] = self.is_owner(participant)  # permet d'afficher « Supprimer » au seul créateur
         if room["is_owner"] and self._access_code:
             room["access_code"] = self._access_code  # visible du seul propriétaire, pour le partager
-        return {"type": "snapshot", "role": role, "room": room, "messages": copy.deepcopy(list(self.messages))}
+        # `you` : mon numéro (None pour un spectateur) ; c'est lui, et non la lettre du siège, qui désigne mes messages.
+        return {"type": "snapshot", "role": role, "you": number, "room": room, "messages": copy.deepcopy(list(self.messages))}
 
     # ---------- accès ----------
     def is_owner(self, participant: str) -> bool:
@@ -228,7 +244,8 @@ class Room:
                 raise RoomFullError("Salon complet.")
             else:
                 role = "spectator"
-        client = Client(id=secrets.token_hex(8), role=role, send=send, participant_id=pid, close=close)
+        number = None if role == "spectator" else self._number_for(pid)
+        client = Client(id=secrets.token_hex(8), role=role, send=send, participant_id=pid, number=number, close=close)
         self.clients[client.id] = client
         self.last_activity = self._clock()
         return client, replaced
@@ -285,7 +302,11 @@ class Room:
                 return None
             verdict = await self._moderator.review(clean)
             if not verdict.allowed:
-                await self._sanction(client, who, verdict.category, verdict.message)
+                if verdict.strike:
+                    await self._sanction(client, who, verdict.category, verdict.message)
+                else:  # vulgarité sans cible : refusé, mais aucun avertissement compté
+                    await client.send({"type": "moderation", "level": "rephrase", "strikes": self._moderator.ledger.strikes(who),
+                                       "max_strikes": MAX_STRIKES, "category": verdict.category, "detail": verdict.message})
                 return None
 
         needs_check = self._checkable(clean)
@@ -293,8 +314,8 @@ class Room:
         self.total_messages += 1
         message = {
             "id": self._next_id,
-            "speaker": client.role,
-            "speaker_name": f"Participant {client.role}",  # anonymes : aucune étiquette politique
+            "speaker": client.number,  # numéro stable, pas la lettre du siège (réattribuée quand quelqu'un part)
+            "speaker_name": f"Participant {client.number}",  # anonymes : aucune étiquette politique
             "text": clean,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "check": (MessageCheck.pending() if needs_check else MessageCheck.no_claim()).model_dump(),
