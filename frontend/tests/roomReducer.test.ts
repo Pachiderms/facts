@@ -7,8 +7,8 @@ const VERIFIED: MessageCheck = { status: 'verified', badge_type: 'green', badge_
 
 const msg = (id: number, over: Partial<RoomMessage> = {}): RoomMessage => ({
   id,
-  speaker: 'A',
-  speaker_name: 'Participant A',
+  speaker: 1,
+  speaker_name: 'Participant 1',
   text: `Message ${id}`,
   timestamp: '2026-11-05T10:00:00+00:00',
   check: PENDING,
@@ -78,8 +78,8 @@ describe('roomReducer', () => {
   })
 
   it('presence : stockée telle quelle', () => {
-    const s = apply(initialRoomState, { type: 'presence', seats: ['A'], max_participants: 4, spectators: 3 })
-    expect(s.presence).toEqual({ seats: ['A'], max_participants: 4, spectators: 3 })
+    const s = apply(initialRoomState, { type: 'presence', present: [1], max_participants: 4, spectators: 3 })
+    expect(s.presence).toEqual({ present: [1], max_participants: 4, spectators: 3 })
   })
 
   it('error : affiche le message serveur ; dismiss l’efface ; texte vide -> message par défaut', () => {
@@ -131,7 +131,7 @@ describe('accès refusé', () => {
 })
 
 describe('modération', () => {
-  const base = (): RoomState => roomReducer(initialRoomState, { type: 'server', event: { type: 'snapshot', role: 'A', room: room(), messages: [msg(1, { check: VERIFIED }), msg(2, { speaker: 'B' })] } })
+  const base = (): RoomState => roomReducer(initialRoomState, { type: 'server', event: { type: 'snapshot', role: 'A', room: room(), messages: [msg(1, { check: VERIFIED }), msg(2, { speaker: 2 })] } })
   const server = (state: RoomState, event: ServerEvent) => roomReducer(state, { type: 'server', event })
 
   it('un avertissement s’affiche et peut être fermé', () => {
@@ -200,5 +200,31 @@ describe('modération : reformulation (vulgarité)', () => {
     })
     expect(s.warning?.level).toBe('rephrase')
     expect(s.denied).toBeNull()
+  })
+})
+
+describe('numéros stables', () => {
+  const server = (state: RoomState, event: ServerEvent) => roomReducer(state, { type: 'server', event })
+
+  it('le snapshot donne mon numéro ; un spectateur n’en a pas', () => {
+    expect(server(initialRoomState, { type: 'snapshot', role: 'A', you: 2, room: room(), messages: [] }).you).toBe(2)
+    expect(server(initialRoomState, { type: 'snapshot', role: 'spectator', you: null, room: room(), messages: [] }).you).toBeNull()
+  })
+
+  it('une valeur inattendue pour « you » est ignorée', () => {
+    const s = server(initialRoomState, { type: 'snapshot', role: 'A', you: '2' as never, room: room(), messages: [] })
+    expect(s.you).toBeNull()
+  })
+
+  it('la présence ne garde que des numéros entiers', () => {
+    const s = server(initialRoomState, { type: 'presence', present: [1, 'x', 3.5, 3] as never, max_participants: 4, spectators: 0 })
+    expect(s.presence?.present).toEqual([1, 3])
+    expect(server(initialRoomState, { type: 'presence', present: 'abc' as never, max_participants: 4, spectators: 0 }).presence?.present).toEqual([])
+  })
+
+  it('après une reconnexion, mon numéro reste celui du snapshot même si mon siège a changé', () => {
+    let s = server(initialRoomState, { type: 'snapshot', role: 'B', you: 2, room: room(), messages: [msg(1, { speaker: 2 })] })
+    s = server(s, { type: 'snapshot', role: 'A', you: 2, room: room(), messages: [msg(1, { speaker: 2 })] })
+    expect(s).toMatchObject({ role: 'A', you: 2 })
   })
 })

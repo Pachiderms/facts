@@ -6,6 +6,8 @@ import { composeHint } from '../../lib/presentation'
 
 interface Props {
   role: Role | null
+  /** Numéro stable de participant (« Participant N »), distinct de la lettre du siège. */
+  number?: number | null
   status: SocketStatus
   onSend: (text: string) => boolean
 }
@@ -16,7 +18,7 @@ const HINT_STYLES = {
   info: 'bg-neutral-100 text-neutral-700 border-neutral-200',
 } as const
 
-export function Composer({ role, status, onSend }: Props) {
+export function Composer({ role, number = null, status, onSend }: Props) {
   const [text, setText] = useState('')
   const [failed, setFailed] = useState(false)
   const fieldId = useId()
@@ -53,7 +55,7 @@ export function Composer({ role, status, onSend }: Props) {
           Intervenir dans la discussion
         </span>
         <span className="rounded-lg border border-neutral-200 bg-neutral-100 px-2.5 py-1 text-[11px] font-bold text-neutral-700">
-          {role === null ? 'Connexion…' : isSpeaker ? `Vous êtes Participant ${role}` : 'Spectateur'}
+          {role === null ? 'Connexion…' : isSpeaker ? number !== null ? `Vous êtes Participant ${number}` : 'Vous êtes intervenant' : 'Spectateur'}
         </span>
       </div>
 

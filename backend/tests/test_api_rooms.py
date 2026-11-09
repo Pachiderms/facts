@@ -124,7 +124,7 @@ def test_full_flow_message_then_check_result_seen_by_everyone():
             send_message(a, CLAIM)
             for ws in (a, b):
                 msg = recv_until(ws, "message")["message"]
-                assert msg["speaker"] == "A" and msg["speaker_name"] == "Participant A"
+                assert msg["speaker"] == 1 and msg["speaker_name"] == "Participant 1"
                 assert msg["check"]["status"] == "pending"
             results = [recv_until(ws, "check_result") for ws in (a, b)]
             assert results[0] == results[1]
@@ -149,9 +149,9 @@ def test_presence_updates_when_someone_joins():
         recv_until(a, "snapshot")
         with connect(c):
             presence = recv_until(a, "presence")
-            while "B" not in presence["seats"]:
+            while 2 not in presence["present"]:
                 presence = recv_until(a, "presence")
-            assert presence["seats"] == ["A", "B"] and presence["max_participants"] == 2
+            assert presence["present"] == [1, 2] and presence["max_participants"] == 2
 
 
 # ---------- Autorisation ----------

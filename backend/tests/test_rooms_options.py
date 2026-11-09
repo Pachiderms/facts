@@ -52,7 +52,7 @@ def test_presence_lists_occupied_seats_in_order():
     import asyncio
 
     asyncio.run(r.leave(b.id))
-    assert r._presence() == {"type": "presence", "seats": ["A", "C"], "max_participants": 3, "spectators": 1}
+    assert r._presence() == {"type": "presence", "present": [1, 3], "max_participants": 3, "spectators": 1}
 
 
 def test_spectators_can_be_refused():
@@ -85,7 +85,7 @@ async def test_every_seat_can_speak_and_spectators_cannot():
     r = room(max_participants=3)
     clients = [r.join(Quiet().send, f"p{i}")[0] for i in range(4)]
     message = await r.post_message(clients[2], "Je suis C, sans chiffre.")
-    assert message["speaker"] == "C" and message["speaker_name"] == "Participant C"
+    assert message["speaker"] == 3 and message["speaker_name"] == "Participant 3"
     with pytest.raises(NotAllowedError):
         await r.post_message(clients[3], "Je suis spectateur.")
 
@@ -207,7 +207,7 @@ def test_three_participant_room_seats_c_and_then_spectators():
             roles = [recv_until(w, "snapshot")["role"] for w in (a, b, cc, spec)]
             assert roles == ["A", "B", "C", "spectator"]
             cc.send_json({"type": "message", "text": "Selon l'INSEE, 12 % en 2024."})
-            assert recv_until(cc, "message")["message"]["speaker"] == "C"
+            assert recv_until(cc, "message")["message"]["speaker"] == 3
 
 
 def test_room_without_spectators_refuses_the_extra_visitor_without_retry():
@@ -357,7 +357,7 @@ def test_spectate_flag_takes_no_seat_even_with_free_seats():
     watcher, _ = r.join(Quiet().send, "w", spectate=True)
     assert watcher.role == "spectator"
     assert r.join(Quiet().send, "a")[0].role == "A"  # les sièges sont toujours libres pour les autres
-    assert r._presence()["seats"] == ["A"]
+    assert r._presence()["present"] == [1]
 
 
 def test_spectate_is_refused_when_spectators_are_not_allowed():
