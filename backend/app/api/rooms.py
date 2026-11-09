@@ -3,7 +3,9 @@
 Protocole WebSocket (JSON) :
   client -> serveur : {"type": "hello", "token": "...", "code": "..."}   (PREMIER message, obligatoire)
                       {"type": "message", "text": "..."}
-  serveur -> client : snapshot | presence | message | check_result | error
+                      {"type": "report", "message_id": N}
+  serveur -> client : snapshot | presence | message | check_result | moderation | message_removed
+                      | report_result | error
 """
 
 import asyncio
@@ -12,7 +14,7 @@ import re
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError, field_validator
 
 from app.adapters.llm import LLMError, LLMRateLimitError
 from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
@@ -59,10 +61,19 @@ class RoomSummary(BaseModel):
     spectators: int
 
 
-class ClientEvent(BaseModel):
+class MessageEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["message"]
     text: str = Field(max_length=2000)
+
+
+class ReportEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["report"]
+    message_id: Annotated[int, Field(strict=True, ge=1, le=10_000_000)]
+
+
+ClientEvent: TypeAdapter = TypeAdapter(Annotated[MessageEvent | ReportEvent, Field(discriminator="type")])
 
 
 class HelloEvent(BaseModel):
@@ -330,6 +341,13 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             return
         pid = participant_id(hello.token)
 
+        moderator = room.moderator
+        if moderator is not None and (left := moderator.ledger.ban_remaining(pid)):
+            await ws.send_json({"type": "error", "code": "banned", "retry_after": left,
+                                "detail": "Vous êtes temporairement exclu des salons pour non-respect des règles."})
+            await ws.close(code=WS_POLICY_VIOLATION)
+            return
+
         if room.requires_code() and not room.is_owner(pid):
             code_limiter = app.state.code_limiter
             if code_limiter.retry_after(ip) > 0:  # on vérifie AVANT de tester le code : pas d'oracle une fois bloqué
@@ -423,8 +441,18 @@ async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings
             problem = ("daily_limit", "Limite quotidienne de messages atteinte. Revenez demain.")
         else:
             try:
-                event = ClientEvent.model_validate_json(raw)
-                await room.post_message(client, event.text)
+                event = ClientEvent.validate_json(raw)
+                if isinstance(event, ReportEvent):
+                    if not ws.app.state.report_review_limiter.allow(client.participant_id or client.id):
+                        outcome = "unavailable"  # quota de signalements jugés atteint
+                    else:
+                        outcome = await room.report(client, event.message_id)
+                    await client.send({"type": "report_result", "message_id": event.message_id, "outcome": outcome})
+                else:
+                    await room.post_message(client, event.text)
+                    if room.is_banned(client):  # 3e message illégal : la connexion est fermée
+                        await ws.close(code=WS_POLICY_VIOLATION)
+                        return
             except ValidationError:
                 problem = ("invalid_event", "Format de message invalide.")
             except NotAllowedError as exc:

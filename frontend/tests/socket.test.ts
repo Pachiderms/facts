@@ -106,6 +106,37 @@ describe('RoomSocket', () => {
     expect(JSON.parse(current().sent[1]!)).toEqual({ type: 'message', text: 'Selon l’INSEE…' }) // sent[0] = hello
   })
 
+  it('décode les événements de modération et ignore un type inconnu', () => {
+    const events: unknown[] = []
+    const sock = new RoomSocket('room-1', { onEvent: (e) => events.push(e), onStatus: () => undefined })
+    sock.connect()
+    current().open()
+    current().receive('{"type":"moderation","level":"warning","strikes":1,"max_strikes":3,"detail":"x"}')
+    current().receive('{"type":"message_removed","message_id":3,"text":"x","trust_score":null,"trust_delta":0}')
+    current().receive('{"type":"report_result","message_id":3,"outcome":"kept"}')
+    current().receive('{"type":"ban_everyone"}')
+    expect(events).toHaveLength(3)
+  })
+
+  it('envoie un signalement au bon format, et refuse si la connexion n’est pas ouverte', () => {
+    socket.connect()
+    expect(socket.report(4)).toBe(false)
+    current().open()
+    expect(socket.report(4)).toBe(true)
+    expect(JSON.parse(current().sent[1]!)).toEqual({ type: 'report', message_id: 4 })
+  })
+
+  it('une exclusion (fermeture 1008) ne déclenche aucune reconnexion', () => {
+    vi.useFakeTimers()
+    socket.connect()
+    current().open()
+    const before = FakeWebSocket.instances.length
+    current().close(1008)
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances.length).toBe(before)
+    vi.useRealTimers()
+  })
+
   describe('identification (premier message obligatoire)', () => {
     const TOKEN = 'abcdefghijklmnopqrstuvwxyz012345'
 

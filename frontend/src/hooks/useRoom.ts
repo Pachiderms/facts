@@ -23,6 +23,9 @@ export function useRoom(roomId: string, code?: string, spectate = false) {
 
   const send = useCallback((text: string): boolean => socket.current?.send(text) ?? false, [])
   const dismissNotice = useCallback(() => dispatch({ type: 'dismiss_notice' }), [])
+  const dismissWarning = useCallback(() => dispatch({ type: 'dismiss_warning' }), [])
+  const dismissReportNotice = useCallback(() => dispatch({ type: 'dismiss_report_notice' }), [])
+  const report = useCallback((messageId: number): boolean => socket.current?.report(messageId) ?? false, [])
 
-  return { ...state, send, dismissNotice }
+  return { ...state, send, report, dismissNotice, dismissWarning, dismissReportNotice }
 }

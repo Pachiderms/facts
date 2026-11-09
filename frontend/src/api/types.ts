@@ -99,6 +99,8 @@ export interface RoomMessage {
   /** ISO 8601, UTC. */
   timestamp: string
   check: MessageCheck
+  /** Retiré par la modération : le texte d'origine n'est plus fourni. */
+  removed?: boolean
 }
 
 export interface Presence {
@@ -120,7 +122,20 @@ export type ServerEvent =
       trust_score: number | null
       trust_delta: number
     }
-  | { type: 'error'; code: string; detail: string }
+  | { type: 'error'; code: string; detail: string; retry_after?: number }
+  | {
+      type: 'moderation'
+      level: 'warning' | 'final_warning' | 'banned'
+      strikes: number
+      max_strikes: number
+      detail: string
+      retry_after?: number
+    }
+  | { type: 'message_removed'; message_id: number; text: string; trust_score: number | null; trust_delta: number }
+  | { type: 'report_result'; message_id: number; outcome: ReportOutcome }
+
+export type ReportOutcome = 'removed' | 'kept' | 'unavailable' | 'duplicate' | 'own' | 'unknown'
+export const REPORT_OUTCOMES: readonly ReportOutcome[] = ['removed', 'kept', 'unavailable', 'duplicate', 'own', 'unknown']
 
 /** Limites alignées sur le backend (CheckRequest et ws_max_message_chars). */
 export const ASSERTION_MIN = 10
