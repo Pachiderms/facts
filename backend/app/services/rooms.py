@@ -77,6 +77,7 @@ MAX_REMEMBERED_PARTICIPANTS = 500  # mémoire bornée dans un salon permanent
 KICK_THRESHOLD_MIN, KICK_THRESHOLD_MAX, KICK_THRESHOLD_DEFAULT = 20, 40, 30
 MIN_CHECKED_FOR_KICK = 3  # il faut au moins 3 messages vérifiés pour qu'un score individuel compte
 KICK_VOTE_SECONDS = 45.0
+AUTO_KICK_THRESHOLD = 20  # salons sans créateur : en dessous, exclusion automatique (pas de vote)
 KICK_COOLDOWN_SECONDS = 300.0  # après un vote perdu, on ne peut pas viser tout de suite la même personne
 
 
@@ -266,6 +267,9 @@ class Room:
         pid = participant_id or secrets.token_hex(8)
         if pid in self._kicked:
             raise KickedError("Vous avez été exclu de ce salon.")
+        if self._auto_kick_due(self._numbers.get(pid)):  # exclu automatiquement alors qu'il était absent
+            self._kicked.add(pid)
+            raise KickedError("Vous avez été exclu de ce salon.")
         replaced = next((c for c in self.clients.values() if c.participant_id == pid), None)
         if replaced is None and len(self.clients) >= self._max_clients:
             raise RoomFullError("Salon complet.")
@@ -305,6 +309,13 @@ class Room:
         if counts is None or sum(counts[s] for s in WEIGHTS) < MIN_CHECKED_FOR_KICK:
             return None
         return compute_trust_score(counts)
+
+    def _auto_kick_due(self, number: int | None) -> bool:
+        """Salon sans créateur (salons d'exemple) : personne pour proposer ni voter, la règle s'applique seule."""
+        if self.owner_id is not None:
+            return False
+        score = self.individual_score(number)
+        return score is not None and score < AUTO_KICK_THRESHOLD
 
     def _client_by_number(self, number: int) -> Client | None:
         return next((c for c in self.clients.values() if c.number == number), None)
@@ -529,7 +540,11 @@ class Room:
             }
         )
         if check.status in WEIGHTS:
-            await self.broadcast(self._presence())  # les scores individuels ont bougé
+            speaker = self._client_by_number(message["speaker"])
+            if speaker is not None and self._auto_kick_due(speaker.number):
+                await self._apply_kick(speaker)  # diffuse déjà la présence
+            else:
+                await self.broadcast(self._presence())  # les scores individuels ont bougé
 
     # ---------- modération ----------
     @property

@@ -329,3 +329,53 @@ def test_ws_kicked_identity_is_rejected_at_join():
 def participant_id_of(n):
     from app.core.identity import participant_id
     return participant_id(token(n))
+
+
+class FalseChecker:
+    async def check(self, text):
+        from app.services.message_checker import MessageCheck
+        return MessageCheck(status="false", badge_type="red", badge_text="ERRONÉ")
+
+
+# ---------- salons sans créateur : exclusion automatique sous 20 % ----------
+async def test_ownerless_room_auto_kicks_below_twenty_percent():
+    room, _ = make_room(owner=None)
+    room._checker = FalseChecker()
+    a, a_sink = join(room, "a")
+    b, _ = join(room, "b")
+    score_for(room, a.number, "false", "false", "false")  # 20 % : le 4e verdict « faux » fait passer à 16 %
+    msg = {"id": 1, "speaker": a.number, "text": "x"}
+    room.messages.append(msg)
+    await room._run_check(msg)
+    assert "a" in room._kicked
+    assert a.id not in room.clients and b.id in room.clients
+    assert any(e.get("code") == "kicked" for e in a_sink.events)
+    with pytest.raises(KickedError):
+        join(room, "a")
+
+
+async def test_ownerless_room_does_not_kick_at_exactly_twenty_or_with_too_few_messages():
+    room, _ = make_room(owner=None)
+    a, _ = join(room, "a")
+    score_for(room, a.number, "false", "false", "false")  # 20 % pile : pas « < 20 »
+    assert not room._auto_kick_due(a.number)
+    c, _ = join(room, "c")
+    score_for(room, c.number, "false", "false")  # < 3 messages : pas de score
+    assert not room._auto_kick_due(c.number)
+
+
+async def test_ownerless_auto_kick_also_catches_a_participant_who_left_before_the_verdict():
+    room, _ = make_room(owner=None)
+    a, _ = join(room, "a")
+    n = a.number
+    await room.leave(a.id)
+    score_for(room, n, "false", "false", "false", "false")
+    with pytest.raises(KickedError):
+        join(room, "a")
+
+
+async def test_room_with_creator_never_auto_kicks():
+    room, _ = make_room()  # a un créateur : vote obligatoire
+    bad, _ = join(room, BAD)
+    score_for(room, bad.number, "false", "false", "false", "false")
+    assert not room._auto_kick_due(bad.number)
