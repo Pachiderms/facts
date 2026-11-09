@@ -125,7 +125,7 @@ export type ServerEvent =
   | { type: 'error'; code: string; detail: string; retry_after?: number }
   | {
       type: 'moderation'
-      level: 'warning' | 'final_warning' | 'banned'
+      level: 'rephrase' | 'warning' | 'final_warning' | 'banned'
       strikes: number
       max_strikes: number
       detail: string

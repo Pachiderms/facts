@@ -285,7 +285,11 @@ class Room:
                 return None
             verdict = await self._moderator.review(clean)
             if not verdict.allowed:
-                await self._sanction(client, who, verdict.category, verdict.message)
+                if verdict.strike:
+                    await self._sanction(client, who, verdict.category, verdict.message)
+                else:  # vulgarité sans cible : refusé, mais aucun avertissement compté
+                    await client.send({"type": "moderation", "level": "rephrase", "strikes": self._moderator.ledger.strikes(who),
+                                       "max_strikes": MAX_STRIKES, "category": verdict.category, "detail": verdict.message})
                 return None
 
         needs_check = self._checkable(clean)

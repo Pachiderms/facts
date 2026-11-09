@@ -613,6 +613,16 @@ describe('RoomPage : modération', () => {
     expect(dismissWarning).toHaveBeenCalled()
   })
 
+  it('vulgarité : invitation à reformuler, sans compteur d’avertissements', () => {
+    hooks.useRoom.mockReturnValue(
+      roomState({ warning: { level: 'rephrase', strikes: 0, maxStrikes: 3, detail: 'Message non publié : merci de le reformuler sans vulgarité.' } }),
+    )
+    render(<RoomPage id="room-1" />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Message non publié.*reformuler sans vulgarité/)
+    expect(alert).not.toHaveTextContent(/Avertissement|\/3/)
+  })
+
   it('le dernier avertissement est clairement indiqué', () => {
     hooks.useRoom.mockReturnValue(roomState({ warning: { level: 'final_warning', strikes: 2, maxStrikes: 3, detail: 'x' } }))
     render(<RoomPage id="room-1" />)

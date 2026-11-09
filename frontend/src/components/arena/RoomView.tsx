@@ -202,11 +202,22 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
       {warning && (
         <div role="alert" className="flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
           <span>
-            <strong className="font-extrabold">
-              {warning.level === 'final_warning' ? 'Dernier avertissement' : 'Avertissement'} ({warning.strikes}/{warning.maxStrikes})
-            </strong>
-            {' · '}
-            {warning.detail} Votre message n’a pas été publié.
+            {warning.level === 'rephrase' ? (
+              // Vulgarité : simple invitation à reformuler, aucun avertissement compté.
+              <>
+                <strong className="font-extrabold">Message non publié</strong>
+                {' · '}
+                {warning.detail}
+              </>
+            ) : (
+              <>
+                <strong className="font-extrabold">
+                  {warning.level === 'final_warning' ? 'Dernier avertissement' : 'Avertissement'} ({warning.strikes}/{warning.maxStrikes})
+                </strong>
+                {' · '}
+                {warning.detail} Votre message n’a pas été publié.
+              </>
+            )}
           </span>
           <button type="button" onClick={dismissWarning} aria-label="Fermer l’avertissement" className="shrink-0 rounded p-0.5 hover:bg-amber-100">
             <X className="h-3.5 w-3.5" aria-hidden="true" />
