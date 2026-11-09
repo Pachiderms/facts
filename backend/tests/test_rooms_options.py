@@ -52,7 +52,7 @@ def test_presence_lists_occupied_seats_in_order():
     import asyncio
 
     asyncio.run(r.leave(b.id))
-    assert r._presence() == {"type": "presence", "present": [1, 3], "max_participants": 3, "spectators": 1}
+    assert r._presence() == {"type": "presence", "present": [1, 3], "max_participants": 3, "spectators": 1, "scores": {"1": None, "3": None}}
 
 
 def test_spectators_can_be_refused():

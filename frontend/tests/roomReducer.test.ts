@@ -79,7 +79,7 @@ describe('roomReducer', () => {
 
   it('presence : stockée telle quelle', () => {
     const s = apply(initialRoomState, { type: 'presence', present: [1], max_participants: 4, spectators: 3 })
-    expect(s.presence).toEqual({ present: [1], max_participants: 4, spectators: 3 })
+    expect(s.presence).toEqual({ present: [1], max_participants: 4, spectators: 3, scores: {} })
   })
 
   it('error : affiche le message serveur ; dismiss l’efface ; texte vide -> message par défaut', () => {
@@ -226,5 +226,50 @@ describe('numéros stables', () => {
     let s = server(initialRoomState, { type: 'snapshot', role: 'B', you: 2, room: room(), messages: [msg(1, { speaker: 2 })] })
     s = server(s, { type: 'snapshot', role: 'A', you: 2, room: room(), messages: [msg(1, { speaker: 2 })] })
     expect(s).toMatchObject({ role: 'A', you: 2 })
+  })
+})
+
+describe('roomReducer : exclusion', () => {
+  const VOTE = { type: 'kick_vote' as const, target: 2, score: 20, threshold: 30, yes: 1, no: 0, ends_in: 45, voters: 3 }
+
+  it('kick_vote : affiche le vote', () => {
+    expect(apply(initialRoomState, VOTE).kickVote).toMatchObject({ target: 2, yes: 1, voters: 3 })
+  })
+
+  it('kick_vote invalide (types douteux) : ignoré', () => {
+    const bad = { ...VOTE, score: '20' } as unknown as ServerEvent
+    expect(apply(initialRoomState, bad).kickVote).toBeNull()
+    const neg = { ...VOTE, yes: -1 } as ServerEvent
+    expect(apply(initialRoomState, neg).kickVote).toBeNull()
+  })
+
+  it('un nouveau vote sur la même cible garde « j’ai voté »', () => {
+    const voted = roomReducer(apply(initialRoomState, VOTE), { type: 'voted' })
+    expect(apply(voted, { ...VOTE, yes: 2 }).voted).toBe(true)
+  })
+
+  it('kick_result : efface le vote et affiche l’issue', () => {
+    const s = apply(apply(initialRoomState, VOTE), { type: 'kick_result', target: 2, outcome: 'kicked' })
+    expect(s.kickVote).toBeNull()
+    expect(s.kickNotice).toContain('exclu')
+  })
+
+  it('kick_result sur soi-même : « Vous avez été exclu »', () => {
+    const base = { ...initialRoomState, you: 2 }
+    expect(apply(base, { type: 'kick_result', target: 2, outcome: 'kicked' }).kickNotice).toContain('Vous avez été exclu')
+  })
+
+  it('role : prise de siège met à jour rôle et numéro', () => {
+    const s = apply({ ...initialRoomState, role: 'spectator', you: null }, { type: 'role', role: 'B', you: 2 })
+    expect(s).toMatchObject({ role: 'B', you: 2 })
+  })
+
+  it('error kicked : accès refusé', () => {
+    expect(apply(initialRoomState, { type: 'error', code: 'kicked', detail: 'x' }).denied).toBe('kicked')
+  })
+
+  it('presence : scores nettoyés (clés numériques, valeurs number|null)', () => {
+    const ev = { type: 'presence', present: [1], max_participants: 2, spectators: 0, scores: { '1': 25, x: 3, '2': 'a' } } as unknown as ServerEvent
+    expect(apply(initialRoomState, ev).presence?.scores).toEqual({ '1': 25 })
   })
 })

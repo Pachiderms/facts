@@ -1,7 +1,7 @@
 import { Globe, Lock, Sparkles } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { ApiError, createRoom, reformulateTitle, type Reformulation } from '../../api/client'
-import { PARTICIPANTS_MAX, PARTICIPANTS_MIN, ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
+import { KICK_THRESHOLDS, KICK_THRESHOLD_DEFAULT, PARTICIPANTS_MAX, PARTICIPANTS_MIN, ROOM_TITLE_MAX, ROOM_TITLE_MIN, type Visibility } from '../../api/types'
 import { recordVisit } from '../../lib/history'
 import { rememberCode } from '../../lib/identity'
 import { CREATABLE_THEMES, themeBadge } from '../../lib/presentation'
@@ -13,6 +13,7 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
   const [visibility, setVisibility] = useState<Visibility>('public')
   const [maxParticipants, setMaxParticipants] = useState(PARTICIPANTS_MIN)
   const [spectators, setSpectators] = useState(true)
+  const [kickThreshold, setKickThreshold] = useState<number>(KICK_THRESHOLD_DEFAULT)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inFlight = useRef(false)
@@ -22,7 +23,7 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
   const [suggestError, setSuggestError] = useState<string | null>(null)
   const suggestAbort = useRef<AbortController | null>(null)
   useEffect(() => () => suggestAbort.current?.abort(), [])
-  const ids = { title: useId(), theme: useId(), seats: useId() }
+  const ids = { title: useId(), theme: useId(), seats: useId(), kick: useId() }
 
   const trimmed = title.trim()
   const tooShort = trimmed.length < ROOM_TITLE_MIN
@@ -71,6 +72,7 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
         visibility,
         max_participants: maxParticipants,
         spectators_allowed: spectators,
+        kick_threshold: kickThreshold,
       })
       // Dès la création, le salon entre dans « Mes salons » : on le retrouve même si on quitte la page.
       recordVisit({ id: created.id, title: trimmed, visibility: created.visibility, code: created.access_code ?? undefined, owner: true })
@@ -227,6 +229,27 @@ export function CreateRoomForm({ onCancel }: { onCancel: () => void }) {
             <span className="text-neutral-500">Jusqu’à 20 personnes qui suivent sans intervenir.</span>
           </span>
         </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label htmlFor={ids.kick} className="text-xs font-bold text-neutral-800">
+          Seuil d’exclusion d’un participant
+        </label>
+        <select
+          id={ids.kick}
+          value={kickThreshold}
+          onChange={(e) => setKickThreshold(Number(e.target.value))}
+          className="w-full rounded-xl border border-neutral-300 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-900"
+        >
+          {KICK_THRESHOLDS.map((n) => (
+            <option key={n} value={n}>
+              {n} %{n === KICK_THRESHOLD_DEFAULT ? ' (par défaut)' : ''}
+            </option>
+          ))}
+        </select>
+        <p className="text-[11px] text-neutral-500">
+          Sous ce score de fiabilité individuel (3 messages vérifiés minimum), vous pouvez proposer d’exclure un participant ; les spectateurs votent.
+        </p>
       </div>
 
       {error && (

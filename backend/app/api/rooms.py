@@ -26,6 +26,10 @@ from app.services.rooms import (
     MAX_PARTICIPANTS,
     MIN_PARTICIPANTS,
     THEMES,
+    KICK_THRESHOLD_DEFAULT,
+    KICK_THRESHOLD_MAX,
+    KICK_THRESHOLD_MIN,
+    KickedError,
     NotAllowedError,
     RoomFullError,
     RoomNotEmptyError,
@@ -55,6 +59,7 @@ class RoomSummary(BaseModel):
     visibility: Literal["public", "private"]
     max_participants: int
     spectators_allowed: bool
+    kick_threshold: int
     trust_score: int | None
     message_count: int
     participants: int
@@ -73,7 +78,26 @@ class ReportEvent(BaseModel):
     message_id: Annotated[int, Field(strict=True, ge=1, le=10_000_000)]
 
 
-ClientEvent: TypeAdapter = TypeAdapter(Annotated[MessageEvent | ReportEvent, Field(discriminator="type")])
+class KickEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["kick"]
+    target: Annotated[int, Field(strict=True, ge=1, le=10_000_000)]
+
+
+class VoteEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["vote"]
+    approve: Annotated[bool, Field(strict=True)]
+
+
+class TakeSeatEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["take_seat"]
+
+
+ClientEvent: TypeAdapter = TypeAdapter(
+    Annotated[MessageEvent | ReportEvent | KickEvent | VoteEvent | TakeSeatEvent, Field(discriminator="type")]
+)
 
 
 class HelloEvent(BaseModel):
@@ -100,6 +124,8 @@ class CreateRoomRequest(BaseModel):
     # strict : « 3 », 3.0 ou true ne sont pas acceptés comme nombre de participants
     max_participants: Annotated[int, Field(strict=True, ge=MIN_PARTICIPANTS, le=MAX_PARTICIPANTS)] = 2
     spectators_allowed: Annotated[bool, Field(strict=True)] = True
+    # Score individuel sous lequel le créateur peut proposer une exclusion (20 à 40, 30 par défaut).
+    kick_threshold: Annotated[int, Field(strict=True, ge=KICK_THRESHOLD_MIN, le=KICK_THRESHOLD_MAX)] = KICK_THRESHOLD_DEFAULT
     participant_token: str
 
     @field_validator("participant_token")
@@ -280,6 +306,7 @@ async def create_room(request: Request, body: CreateRoomRequest):
             owner_id=participant_id(body.participant_token),
             max_participants=body.max_participants,
             spectators_allowed=body.spectators_allowed,
+            kick_threshold=body.kick_threshold,
         )
     except TooManyRoomsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
@@ -362,6 +389,9 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED), spectate=hello.spectate)
         except SpectatorsNotAllowedError as exc:
             await _reject(ws, "spectators_not_allowed", str(exc))
+            return
+        except KickedError as exc:
+            await _reject(ws, "kicked", str(exc))
             return
         except RoomFullError:
             await _error(ws, "room_full", "Salon complet. Nouvelle tentative automatique.")
@@ -448,6 +478,12 @@ async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings
                     else:
                         outcome = await room.report(client, event.message_id)
                     await client.send({"type": "report_result", "message_id": event.message_id, "outcome": outcome})
+                elif isinstance(event, KickEvent):
+                    await room.start_kick(client, event.target)
+                elif isinstance(event, VoteEvent):
+                    await room.vote(client, event.approve)
+                elif isinstance(event, TakeSeatEvent):
+                    await room.take_seat(client)
                 else:
                     await room.post_message(client, event.text)
                     if room.is_banned(client):  # 3e message illégal : la connexion est fermée

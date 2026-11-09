@@ -25,7 +25,15 @@ export function useRoom(roomId: string, code?: string, spectate = false) {
   const dismissNotice = useCallback(() => dispatch({ type: 'dismiss_notice' }), [])
   const dismissWarning = useCallback(() => dispatch({ type: 'dismiss_warning' }), [])
   const dismissReportNotice = useCallback(() => dispatch({ type: 'dismiss_report_notice' }), [])
+  const dismissKickNotice = useCallback(() => dispatch({ type: 'dismiss_kick_notice' }), [])
+  const kick = useCallback((target: number): boolean => socket.current?.kick(target) ?? false, [])
+  const takeSeat = useCallback((): boolean => socket.current?.takeSeat() ?? false, [])
+  const vote = useCallback((approve: boolean): boolean => {
+    const ok = socket.current?.vote(approve) ?? false
+    if (ok) dispatch({ type: 'voted' })
+    return ok
+  }, [])
   const report = useCallback((messageId: number): boolean => socket.current?.report(messageId) ?? false, [])
 
-  return { ...state, send, report, dismissNotice, dismissWarning, dismissReportNotice }
+  return { ...state, send, report, kick, vote, takeSeat, dismissNotice, dismissWarning, dismissReportNotice, dismissKickNotice }
 }

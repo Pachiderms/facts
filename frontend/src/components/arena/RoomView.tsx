@@ -12,6 +12,7 @@ import { AccessCodeForm } from './AccessCodeForm'
 import { DeleteRoomButton } from './DeleteRoomButton'
 import { Composer } from './Composer'
 import { MessageCard } from './MessageCard'
+import { KickPanel } from './KickPanel'
 import { TrustMeter } from './TrustMeter'
 
 const STATUS_LABEL: Record<SocketStatus, { text: string; dot: string }> = {
@@ -38,6 +39,7 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
   const {
     status, role, you, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
     warning, reportNotice, banRetryAfter, report, dismissWarning, dismissReportNotice,
+    kickVote, voted, kickNotice, kick, vote, takeSeat, dismissKickNotice,
   } = useRoom(roomId, code, spectate)
   const info = room ?? fallback
   const listRef = useRef<HTMLUListElement>(null)
@@ -104,6 +106,21 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
           Vous êtes exclu des salons{banRetryAfter ? ` pendant encore ${formatDuration(banRetryAfter)}` : ' pour un temps'} en raison de messages
           enfreignant les règles (racisme, insultes, menaces).
         </p>
+        <a href="#/arena" className="inline-block text-xs font-bold text-neutral-900 underline-offset-2 hover:underline">
+          Retour aux salons
+        </a>
+      </div>
+    )
+  }
+
+  if (denied === 'kicked') {
+    return (
+      <div role="alert" className="mx-auto max-w-md space-y-3 rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-700 shadow-sm">
+        <p className="flex items-center justify-center gap-2 font-bold text-neutral-900">
+          <UserX className="h-4 w-4" aria-hidden="true" />
+          Vous avez été exclu de ce salon
+        </p>
+        <p>Le créateur et les spectateurs ont décidé de vous exclure en raison de la fiabilité de vos messages. Vous ne pouvez plus y revenir, mais les autres salons restent ouverts.</p>
         <a href="#/arena" className="inline-block text-xs font-bold text-neutral-900 underline-offset-2 hover:underline">
           Retour aux salons
         </a>
@@ -233,6 +250,28 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
           </button>
         </div>
       )}
+
+      {kickNotice && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-800">
+          <span>{kickNotice}</span>
+          <button type="button" onClick={dismissKickNotice} aria-label="Fermer" className="shrink-0 rounded p-0.5 hover:bg-neutral-100">
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      <KickPanel
+        isOwner={room?.is_owner === true}
+        you={you}
+        spectator={role === 'spectator'}
+        presence={presence}
+        threshold={info?.kick_threshold ?? 30}
+        vote={kickVote}
+        voted={voted}
+        onKick={kick}
+        onVote={vote}
+        onTakeSeat={takeSeat}
+      />
 
       {status === 'closed' && (
         <p role="alert" className="rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-xs text-neutral-700">

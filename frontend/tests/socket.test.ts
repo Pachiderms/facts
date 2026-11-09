@@ -98,6 +98,28 @@ describe('RoomSocket', () => {
     expect(events).toHaveLength(1)
   })
 
+  it('envoie kick, vote et take_seat au format attendu (et refuse hors connexion ouverte)', () => {
+    socket.connect()
+    expect(socket.kick(2)).toBe(false)
+    current().open()
+    expect(socket.kick(2)).toBe(true)
+    expect(socket.vote(false)).toBe(true)
+    expect(socket.takeSeat()).toBe(true)
+    expect(current().sent.slice(1).map((x) => JSON.parse(x))).toEqual([
+      { type: 'kick', target: 2 },
+      { type: 'vote', approve: false },
+      { type: 'take_seat' },
+    ])
+  })
+
+  it('n’essaie pas de se reconnecter après une exclusion (fermeture 1008)', () => {
+    socket.connect()
+    current().open()
+    current().drop(1008)
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
   it('envoie un message au format attendu, et refuse si la connexion n’est pas ouverte', () => {
     socket.connect()
     expect(socket.send('trop tôt')).toBe(false)

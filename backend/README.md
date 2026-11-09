@@ -176,3 +176,14 @@ Les lettres A à F sont des **sièges** : elles se libèrent et se réattribuent
 - un spectateur n'a pas de numéro et n'en consomme pas ; plusieurs onglets d'une même personne partagent le même numéro ; mémoire bornée (500 identités par salon).
 
 Protocole : `message.speaker` est un entier ; `snapshot.you` donne **mon** numéro (`null` pour un spectateur) ; `presence` devient `{present: [numéros connectés], max_participants, spectators}`. L'avenir « compte utilisateur » consistera à rattacher le jeton à un compte, sans toucher à ce mécanisme.
+
+### Exclusion par score individuel (PR D)
+
+Chaque message vérifié compte pour son auteur : le **score individuel** (même formule que le score du salon) n'existe qu'à partir de **3 messages vérifiés** ; un message retiré par la modération est décompté. Le créateur choisit le seuil à la création (`kick_threshold`, entier strict 20–40, défaut 30).
+
+- `{"type":"kick","target":N}` : **créateur seulement**. Refusé si : cible absente, c'est le créateur lui-même, salon sans créateur (salons d'exemple), moins de 3 messages vérifiés, score au-dessus du seuil, vote déjà en cours, ou délai de grâce de 5 min après un vote perdu.
+- **Sans spectateur** : le créateur décide seul (exclusion immédiate). **Avec spectateurs** : vote de 45 s ; le créateur compte pour un « pour » ; adopté si « pour » > « contre » (égalité = la personne reste) ; clôture anticipée quand tous ont voté ; annulé si la cible part ; le score est revérifié à la clôture.
+- `{"type":"vote","approve":bool}` : **spectateurs seulement**, un vote par identité (les identités des votants ne sont jamais envoyées, seulement les totaux).
+- Une personne exclue reçoit `error kicked`, la connexion est fermée (1008) et **elle ne peut plus rejoindre ce salon** (mémorisé par identité pour la durée de vie du salon). Son siège est libéré.
+- `{"type":"take_seat"}` : un spectateur prend un siège libre (premier arrivé, premier servi, attribution atomique) ; il reçoit `{"type":"role","role","you"}` puis la présence est rediffusée.
+- Événements : `kick_vote {target, score, threshold, yes, no, ends_in, voters}`, `kick_result {target, outcome: kicked|kept|cancelled}` ; `presence.scores` et `snapshot.kick_vote`.
