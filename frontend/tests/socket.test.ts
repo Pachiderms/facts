@@ -36,7 +36,7 @@ class FakeWebSocket {
 
 describe('parseServerEvent', () => {
   it('décode un événement valide', () => {
-    expect(parseServerEvent('{"type":"presence","seats":["A"],"max_participants":2,"spectators":2}')).toMatchObject({ type: 'presence', spectators: 2 })
+    expect(parseServerEvent('{"type":"presence","present":[1],"max_participants":2,"spectators":2}')).toMatchObject({ type: 'presence', spectators: 2 })
   })
 
   it.each([['pas du json'], ['{"type":"inconnu"}'], ['{"sans":"type"}'], ['null'], ['[]'], [42], [new ArrayBuffer(2)]])('ignore la trame invalide %#', (raw) => {
@@ -92,7 +92,7 @@ describe('RoomSocket', () => {
   it('passe connecting -> open et transmet les événements valides seulement', () => {
     socket.connect()
     current().open()
-    current().receive('{"type":"presence","seats":["A","B"],"max_participants":2,"spectators":0}')
+    current().receive('{"type":"presence","present":[1,2],"max_participants":2,"spectators":0}')
     current().receive('trame invalide')
     expect(statuses).toEqual(['connecting', 'open'])
     expect(events).toHaveLength(1)

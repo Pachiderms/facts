@@ -154,6 +154,7 @@ const room = (over: Partial<RoomSummary> = {}): RoomSummary => ({
 const roomState = (over: Record<string, unknown> = {}) => ({
   status: 'open',
   role: 'A',
+  you: 1,
   room: null,
   messages: [],
   presence: null,
@@ -480,11 +481,11 @@ describe('RoomPage (une room = une page)', () => {
 
   it('affiche le rôle attribué par le serveur, le statut et la présence', () => {
     hooks.useRoomLookup.mockReturnValue(found())
-    hooks.useRoom.mockReturnValue(roomState({ role: 'B', presence: { seats: ['A', 'B'], max_participants: 2, spectators: 2 } }))
+    hooks.useRoom.mockReturnValue(roomState({ role: 'B', you: 2, presence: { present: [1, 2], max_participants: 2, spectators: 2 } }))
     render(<RoomPage id="room-1" />)
-    expect(screen.getByText('Vous êtes Participant B')).toBeInTheDocument()
+    expect(screen.getByText('Vous êtes Participant 2')).toBeInTheDocument()
     expect(screen.getByText('En direct')).toBeInTheDocument()
-    expect(screen.getByText(/Intervenants : 2\/2 \(A, B\) · 2 spectateurs/)).toBeInTheDocument()
+    expect(screen.getByText(/Intervenants : 2\/2 \(n° 1, 2\) · 2 spectateurs/)).toBeInTheDocument()
   })
 
   it('la zone de saisie est dans la page du salon (intervenant) et absente pour un spectateur', () => {
@@ -640,8 +641,8 @@ describe('RoomPage : modération', () => {
   it('le bouton Signaler n’apparaît que sur les messages des autres', async () => {
     const report = vi.fn()
     const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
-    const mk = (id: number, speaker: string) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
-    hooks.useRoom.mockReturnValue(roomState({ role: 'A', report, messages: [mk(1, 'A'), mk(2, 'B')] }))
+    const mk = (id: number, speaker: number) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', you: 1, report, messages: [mk(1, 1), mk(2, 2)] }))
     render(<RoomPage id="room-1" />)
     const buttons = screen.getAllByRole('button', { name: /Signaler/ })
     expect(buttons).toHaveLength(1)
@@ -651,8 +652,8 @@ describe('RoomPage : modération', () => {
 
   it('un spectateur peut signaler tous les messages', () => {
     const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
-    const mk = (id: number, speaker: string) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
-    hooks.useRoom.mockReturnValue(roomState({ role: 'spectator', messages: [mk(1, 'A'), mk(2, 'B')] }))
+    const mk = (id: number, speaker: number) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'spectator', you: null, messages: [mk(1, 1), mk(2, 2)] }))
     render(<RoomPage id="room-1" />)
     expect(screen.getAllByRole('button', { name: /Signaler/ })).toHaveLength(2)
   })
@@ -661,5 +662,41 @@ describe('RoomPage : modération', () => {
     hooks.useRoom.mockReturnValue(roomState({ reportNotice: 'Merci : le message a été retiré par la modération.' }))
     render(<RoomPage id="room-1" />)
     expect(screen.getByText(/le message a été retiré/)).toBeInTheDocument()
+  })
+})
+
+describe('RoomPage : numéros stables (scénario du retour de B)', () => {
+  const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+  const mk = (id: number, speaker: number) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+
+  beforeEach(() => hooks.useRoomLookup.mockReturnValue(found()))
+
+  it('B revient seul et prend le siège A : ses anciens messages restent à lui (« vous »), ceux de A sont « absent »', () => {
+    hooks.useRoom.mockReturnValue(
+      roomState({ role: 'A', you: 2, presence: { present: [2], max_participants: 2, spectators: 0 }, messages: [mk(1, 1), mk(2, 2)] }),
+    )
+    render(<RoomPage id="room-1" />)
+    expect(screen.getAllByText('vous')).toHaveLength(1)
+    expect(screen.getAllByText('absent')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /Signaler/ })).toHaveLength(1) // seulement le message de l'autre
+  })
+
+  it('C arrive sur le siège de l’ancien B : il peut signaler les anciens messages de B', async () => {
+    const report = vi.fn()
+    hooks.useRoom.mockReturnValue(
+      roomState({ role: 'B', you: 3, report, presence: { present: [1, 3], max_participants: 2, spectators: 0 }, messages: [mk(1, 1), mk(2, 2)] }),
+    )
+    render(<RoomPage id="room-1" />)
+    const buttons = screen.getAllByRole('button', { name: /Signaler/ })
+    expect(buttons).toHaveLength(2) // Participant 1 (présent) et Participant 2 (absent)
+    await userEvent.click(screen.getByRole('button', { name: 'Signaler le message de Participant 2' }))
+    expect(report).toHaveBeenCalledWith(2)
+    expect(screen.getAllByText('absent')).toHaveLength(1)
+  })
+
+  it('pas de marque « absent » tant que la présence n’est pas connue', () => {
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', you: 1, presence: null, messages: [mk(1, 1), mk(2, 2)] }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.queryByText('absent')).not.toBeInTheDocument()
   })
 })
