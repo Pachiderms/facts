@@ -1,4 +1,4 @@
-import { Lock, Pin, PinOff, X } from 'lucide-react'
+import { Eye, Lock, Pin, PinOff, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { roomsStatus } from '../../api/client'
 import { loadHistory, removeEntry, togglePin, type HistoryEntry } from '../../lib/history'
@@ -54,6 +54,17 @@ export function MyRooms() {
               </div>
 
               <div className="flex items-center gap-1.5">
+                {!expired && (
+                  // Entrer en spectateur, sans prendre de siège ; le code d'un salon privé vient de l'historique.
+                  <a
+                    href={roomHref(entry.id, true)}
+                    aria-label={`Regarder ${entry.title} en spectateur`}
+                    title="Regarder en spectateur"
+                    className="rounded-lg border border-neutral-200 p-1.5 text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+                  >
+                    <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                  </a>
+                )}
                 {entry.owner && !expired && <DeleteRoomButton roomId={entry.id} compact onDeleted={() => setEntries(removeEntry(entry.id))} />}
                 <button
                   type="button"
