@@ -1,0 +1,79 @@
+"""Garde-fous du déploiement : l'image, le blueprint Render et le comportement « prod » de l'API."""
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.core.config import Settings
+from app.main import create_app
+
+ROOT = Path(__file__).resolve().parents[2]
+DOCKERFILE = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
+DOCKERIGNORE = (ROOT / "backend" / ".dockerignore").read_text(encoding="utf-8").splitlines()
+RENDER = (ROOT / "render.yaml").read_text(encoding="utf-8")
+FRONT = "https://facts.pages.dev"
+
+
+def test_image_runs_as_unprivileged_user_in_prod_mode_with_a_single_worker():
+    assert "USER facts" in DOCKERFILE
+    assert DOCKERFILE.index("USER facts") < DOCKERFILE.index("CMD")  # le serveur ne tourne jamais en root
+    assert "FACTS_ENV=prod" in DOCKERFILE
+    assert "--workers 1" in DOCKERFILE  # l'état des salons est en mémoire : un seul processus
+    assert "${PORT:-8000}" in DOCKERFILE  # Render impose son port
+
+
+def test_image_never_contains_secrets_or_dev_files():
+    assert ".env" in DOCKERIGNORE and "tests" in DOCKERIGNORE and ".git" in DOCKERIGNORE
+    assert "COPY . " not in DOCKERFILE and "COPY .env" not in DOCKERFILE
+    assert "API_KEY" not in DOCKERFILE
+
+
+def test_render_blueprint_is_free_prod_and_keeps_secrets_out_of_the_repo():
+    assert "plan: free" in RENDER
+    assert "healthCheckPath: /health" in RENDER
+    assert "FACTS_ENV" in RENDER and "value: prod" in RENDER
+    for secret in ("FACTS_LLM_API_KEY", "FACTS_TAVILY_API_KEY", "FACTS_CORS_ORIGINS"):
+        block = RENDER.split(f"key: {secret}")[1].split("- key:")[0]
+        assert "sync: false" in block, f"{secret} doit être saisi dans le tableau de bord, pas dans le dépôt"
+    assert "gsk_" not in RENDER and "tvly-" not in RENDER  # préfixes des clés Groq / Tavily
+
+
+def test_env_example_has_no_real_secret():
+    example = (ROOT / "backend" / ".env.example").read_text(encoding="utf-8")
+    for line in example.splitlines():
+        if line.startswith(("FACTS_LLM_API_KEY=", "FACTS_TAVILY_API_KEY=")):
+            assert line.split("=", 1)[1].strip() == ""
+
+
+@pytest.fixture
+def prod_client():
+    settings = Settings(env="prod", cors_origins=FRONT, llm_api_key="x", _env_file=None)
+    with TestClient(create_app(settings=settings)) as client:
+        yield client
+
+
+def test_prod_hides_interactive_docs_and_schema(prod_client):
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert prod_client.get(path).status_code == 404
+
+
+def test_prod_health_endpoint_for_the_platform_probe(prod_client):
+    assert prod_client.get("/health").json() == {"status": "ok"}
+
+
+def test_prod_cors_only_allows_the_deployed_front(prod_client):
+    ok = prod_client.get("/api/v1/rooms", headers={"Origin": FRONT})
+    assert ok.headers.get("access-control-allow-origin") == FRONT
+    bad = prod_client.get("/api/v1/rooms", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in bad.headers
+
+
+def test_prod_websocket_refuses_foreign_or_missing_origin(prod_client):
+    from starlette.websockets import WebSocketDisconnect
+
+    room_id = prod_client.get("/api/v1/rooms").json()[0]["id"]
+    for headers in ({"origin": "https://evil.example"}, {}):
+        with pytest.raises(WebSocketDisconnect):
+            with prod_client.websocket_connect(f"/api/v1/rooms/{room_id}/ws", headers=headers):
+                pass

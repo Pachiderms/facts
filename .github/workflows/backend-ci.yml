@@ -2,9 +2,9 @@ name: backend-ci
 
 on:
   push:
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["backend/**", "render.yaml", ".github/workflows/backend-ci.yml"]
   pull_request:
-    paths: ["backend/**", ".github/workflows/backend-ci.yml"]
+    paths: ["backend/**", "render.yaml", ".github/workflows/backend-ci.yml"]
 
 permissions:
   contents: read
@@ -27,3 +27,19 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: python -m pytest
+
+  docker:
+    # Vérifie que l'image de production se construit et démarre, sans secret réel.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t facts-api ./backend
+      - name: Démarrage et sonde de santé
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e FACTS_LLM_API_KEY=ci-dummy -e FACTS_SEARCH_PROVIDERS=wikipedia \
+            -e FACTS_CORS_ORIGINS=https://facts.pages.dev facts-api
+          for i in $(seq 1 20); do curl -sf localhost:8000/health && exit 0; sleep 1; done
+          docker logs api; exit 1
+      - name: Le processus ne tourne pas en root
+        run: test "$(docker exec api id -u)" != "0"
