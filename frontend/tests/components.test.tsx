@@ -104,8 +104,8 @@ const PENDING: MessageCheck = { status: 'pending', badge_type: 'gray', badge_tex
 
 const message = (over: Partial<RoomMessage> = {}, check: Partial<MessageCheck> = {}): RoomMessage => ({
   id: 1,
-  speaker: 1,
-  speaker_name: 'Participant 1',
+  speaker: 'A',
+  speaker_name: 'Participant A',
   text: 'Selon l’INSEE, 12 %.',
   timestamp: '2026-11-05T10:00:00+00:00',
   check: { ...PENDING, ...check },
@@ -243,7 +243,7 @@ describe('MessageCard : signalement et message retiré', () => {
     const { rerender } = render(<ul><MessageCard message={message({ id: 7 })} /></ul>)
     expect(screen.queryByRole('button', { name: /Signaler/ })).not.toBeInTheDocument()
     rerender(<ul><MessageCard message={message({ id: 7 })} onReport={onReport} /></ul>)
-    await userEvent.click(screen.getByRole('button', { name: /Signaler le message de Participant 1/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Signaler le message de Participant A/ }))
     expect(onReport).toHaveBeenCalledWith(7)
   })
 
@@ -253,44 +253,5 @@ describe('MessageCard : signalement et message retiré', () => {
     expect(screen.getByText('[Message retiré par la modération]')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Signaler/ })).not.toBeInTheDocument()
     expect(screen.getByText('[RETIRÉ]').closest('.hidden')).not.toBeNull() // masqué visuellement
-  })
-})
-
-describe('MessageCard : numéros stables', () => {
-  const side = () => screen.getByRole('listitem').className
-
-  it('« vous » sur mes messages, aligné à droite ; les autres à gauche', () => {
-    const { rerender } = render(<ul><MessageCard message={message({ speaker: 2, speaker_name: 'Participant 2' })} mine /></ul>)
-    expect(screen.getByText('vous')).toBeInTheDocument()
-    expect(side()).toContain('ml-6')
-    rerender(<ul><MessageCard message={message({ speaker: 1 })} /></ul>)
-    expect(screen.queryByText('vous')).not.toBeInTheDocument()
-    expect(side()).toContain('mr-6')
-  })
-
-  it('le numéro (pas la lettre d’un siège) est affiché dans l’avatar', () => {
-    render(<ul><MessageCard message={message({ speaker: 7, speaker_name: 'Participant 7' })} /></ul>)
-    expect(screen.getByText('7')).toBeInTheDocument()
-  })
-
-  it('un auteur parti est marqué « absent » ; jamais sur mes propres messages', () => {
-    const { rerender } = render(<ul><MessageCard message={message()} absent /></ul>)
-    expect(screen.getByText('absent')).toBeInTheDocument()
-    rerender(<ul><MessageCard message={message()} absent mine /></ul>)
-    expect(screen.queryByText('absent')).not.toBeInTheDocument()
-  })
-
-  it('un spectateur voit les numéros impairs à gauche et pairs à droite', () => {
-    const { rerender } = render(<ul><MessageCard message={message({ speaker: 1 })} viewerIsSpectator /></ul>)
-    expect(side()).toContain('mr-6')
-    rerender(<ul><MessageCard message={message({ speaker: 2 })} viewerIsSpectator /></ul>)
-    expect(side()).toContain('ml-6')
-  })
-})
-
-describe('Composer : numéro de participant', () => {
-  it('affiche le numéro stable, pas la lettre du siège', () => {
-    render(<Composer role="A" number={2} status="open" onSend={vi.fn()} />)
-    expect(screen.getByText('Vous êtes Participant 2')).toBeInTheDocument()
   })
 })

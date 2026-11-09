@@ -381,7 +381,7 @@ def test_same_identity_in_two_tabs_replaces_the_first_and_keeps_one_seat():
                     first.receive_json()
                 assert exc.value.code == 4000
                 presence = recv_until(second, "presence")
-                assert presence["present"] == [1]
+                assert presence["seats"] == ["A"]
 
 
 def test_two_different_identities_get_both_seats():
@@ -396,7 +396,7 @@ def test_a_created_room_is_a_live_debate_room():
         with connect(c, rid, n=1) as ws:
             recv_until(ws, "snapshot")
             ws.send_json({"type": "message", "text": "Selon l'INSEE, l'inflation est de 2 % en 2025."})
-            assert recv_until(ws, "message")["message"]["speaker"] == 1
+            assert recv_until(ws, "message")["message"]["speaker"] == "A"
 
 
 def test_message_events_cannot_be_sent_as_hello_replay():

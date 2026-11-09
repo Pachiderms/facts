@@ -1,5 +1,5 @@
 import type { SocketStatus } from '../api/socket'
-import { REPORT_OUTCOMES, type MessageCheck, type Presence, type Role, type RoomMessage, type RoomSummary, type ServerEvent } from '../api/types'
+import { REPORT_OUTCOMES, isSeat, type MessageCheck, type Presence, type Role, type RoomMessage, type RoomSummary, type ServerEvent } from '../api/types'
 
 /** Plafond local : le serveur borne déjà l'historique, on borne aussi l'affichage. */
 export const MAX_MESSAGES = 500
@@ -7,8 +7,6 @@ export const MAX_MESSAGES = 500
 export interface RoomState {
   status: SocketStatus
   role: Role | null
-  /** Mon numéro de participant dans ce salon (null : spectateur ou pas encore connecté). */
-  you: number | null
   room: RoomSummary | null
   messages: RoomMessage[]
   presence: Presence | null
@@ -49,7 +47,6 @@ const DENIED_CODES: readonly string[] = ['invalid_code', 'too_many_attempts', 's
 export const initialRoomState: RoomState = {
   status: 'connecting',
   role: null,
-  you: null,
   room: null,
   messages: [],
   presence: null,
@@ -94,7 +91,6 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
           return {
             ...state,
             role: event.role,
-            you: Number.isInteger(event.you) ? (event.you as number) : null,
             room: event.room,
             messages: event.messages.slice(-MAX_MESSAGES),
             trustScore: event.room.trust_score,
@@ -104,7 +100,7 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
           return {
             ...state,
             presence: {
-              present: Array.isArray(event.present) ? event.present.filter((n): n is number => Number.isInteger(n)) : [],
+              seats: Array.isArray(event.seats) ? event.seats.filter(isSeat) : [],
               max_participants: event.max_participants,
               spectators: event.spectators,
             },

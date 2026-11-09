@@ -92,7 +92,7 @@ async def test_message_broadcast_then_check_result_updates_trust():
     await room.post_message(a, "Selon l'INSEE, l'inflation est de 2 %.")
     for rec in (rec_a, rec_b):  # les DEUX participants voient le message en attente
         msg = rec.of("message")[0]["message"]
-        assert msg["speaker_name"] == "Participant 1" and msg["check"]["status"] == "pending"
+        assert msg["speaker_name"] == "Participant A" and msg["check"]["status"] == "pending"
     await settle(room)
     result = rec_b.of("check_result")[0]
     assert result["check"]["status"] == "verified"

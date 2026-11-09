@@ -369,7 +369,7 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             return
         if replaced is not None:
             await _evict_replaced(replaced)
-        await ws.send_json(room.snapshot(client.role, pid, client.number))
+        await ws.send_json(room.snapshot(client.role, pid))
         await room.broadcast_presence()
         await _receive_loop(ws, room, client, ip, settings)
     except RuntimeError:

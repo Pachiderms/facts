@@ -93,8 +93,7 @@ export interface MessageCheck {
 
 export interface RoomMessage {
   id: number
-  /** Numéro stable de l'auteur dans ce salon (« Participant N »), jamais réattribué. */
-  speaker: number
+  speaker: Seat
   speaker_name: string
   text: string
   /** ISO 8601, UTC. */
@@ -105,15 +104,15 @@ export interface RoomMessage {
 }
 
 export interface Presence {
-  /** Numéros des participants actuellement connectés. */
-  present: number[]
+  /** Sièges occupés, dans l'ordre. */
+  seats: Seat[]
   max_participants: number
   spectators: number
 }
 
 /** Événements serveur -> client sur le WebSocket d'un salon. */
 export type ServerEvent =
-  | { type: 'snapshot'; role: Role; you?: number | null; room: RoomSummary; messages: RoomMessage[] }
+  | { type: 'snapshot'; role: Role; room: RoomSummary; messages: RoomMessage[] }
   | ({ type: 'presence' } & Presence)
   | { type: 'message'; message: RoomMessage; trust_score: number | null }
   | {

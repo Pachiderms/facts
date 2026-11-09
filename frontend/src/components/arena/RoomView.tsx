@@ -36,7 +36,7 @@ interface Props {
 /** Un salon. Monté avec une `key` : changer de salon ou de code ferme proprement l'ancienne connexion. */
 export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spectate = false }: Props) {
   const {
-    status, role, you, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
+    status, role, room, messages, presence, trustScore, deltas, notice, denied, send, dismissNotice,
     warning, reportNotice, banRetryAfter, report, dismissWarning, dismissReportNotice,
   } = useRoom(roomId, code, spectate)
   const info = room ?? fallback
@@ -179,8 +179,8 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
             </span>
             {presence && (
               <span className="text-[11px] text-neutral-500">
-                Intervenants : {presence.present.length}/{presence.max_participants}
-                {presence.present.length > 0 && ` (n° ${presence.present.join(', ')})`}
+                Intervenants : {presence.seats.length}/{presence.max_participants}
+                {presence.seats.length > 0 && ` (${presence.seats.join(', ')})`}
                 {presence.spectators > 0 && ` · ${presence.spectators} spectateur${presence.spectators > 1 ? 's' : ''}`}
               </span>
             )}
@@ -259,16 +259,13 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
               message={m}
               delta={deltas[m.id]}
               alternate={(info?.max_participants ?? 2) === 2}
-              mine={you !== null && m.speaker === you}
-              viewerIsSpectator={role === 'spectator'}
-              absent={presence !== null && !presence.present.includes(m.speaker)}
-              onReport={you === null || m.speaker !== you ? report : undefined}
+              onReport={m.speaker !== role ? report : undefined}
             />
           ))
         )}
       </ul>
 
-      <Composer role={role} number={you} status={status} onSend={send} />
+      <Composer role={role} status={status} onSend={send} />
     </div>
   )
 }

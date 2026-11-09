@@ -22,38 +22,26 @@ export function MessageCard({
   message,
   delta,
   alternate = true,
-  mine = false,
-  absent = false,
-  viewerIsSpectator = false,
   onReport,
 }: {
   message: RoomMessage
   delta?: number
   alternate?: boolean
-  /** Message du lecteur lui-même (aligné à droite). */
-  mine?: boolean
-  /** L'auteur n'est plus connecté au salon. */
-  absent?: boolean
-  /** Le lecteur est spectateur : pas de « moi », on alterne selon le numéro. */
-  viewerIsSpectator?: boolean
   /** Fourni uniquement pour les messages des autres : permet de les signaler. */
   onReport?: (messageId: number) => void
 }) {
-  // Débat à deux : les messages se répondent de part et d'autre. Moi à droite ; un spectateur voit les impairs à gauche.
-  const onLeft = viewerIsSpectator ? message.speaker % 2 === 1 : !mine
+  const isA = message.speaker === 'A'
   const tone = badgeTone(message.check.badge_type)
   const pending = message.check.status === 'pending'
 
   return (
-    <li className={`space-y-2.5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ${!alternate ? '' : onLeft ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}>
+    <li className={`space-y-2.5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ${!alternate ? '' : isA ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}>
       <div className="flex items-center justify-between border-b border-neutral-100 pb-2 text-xs">
         <div className="flex items-center space-x-2">
           <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-bold text-neutral-800">
             {message.speaker}
           </span>
           <span className="font-bold text-neutral-900">{message.speaker_name}</span>
-          {mine && <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-bold text-neutral-600">vous</span>}
-          {absent && !mine && <span className="rounded border border-neutral-200 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400">absent</span>}
         </div>
         <time dateTime={message.timestamp} className="font-mono text-[11px] text-neutral-400">
           {formatTime(message.timestamp)}
