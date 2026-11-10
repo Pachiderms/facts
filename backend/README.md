@@ -188,3 +188,13 @@ Chaque message vérifié compte pour son auteur : le **score individuel** (même
 - `{"type":"take_seat"}` : un spectateur prend un siège libre (premier arrivé, premier servi, attribution atomique) ; il reçoit `{"type":"role","role","you"}` puis la présence est rediffusée.
 - Événements : `kick_vote {target, score, threshold, yes, no, ends_in, voters}`, `kick_result {target, outcome: kicked|kept|cancelled}` ; `presence.scores` et `snapshot.kick_vote`.
 - **Salons sans créateur** (salons d'exemple) : personne ne peut proposer ni voter, donc exclusion **automatique** sous 20 % (score individuel < 20, avec au moins 3 messages vérifiés), sans vote, avec la même interdiction de revenir. Le contrôle s'applique aussi à la reconnexion d'une personne qui était absente au moment du verdict. Attention : 3 messages « erronés » donnent exactement 20 % ; il en faut un 4e pour passer sous le seuil.
+
+### Tri des affirmations (PR E)
+
+La règle gratuite (`is_checkable` : chiffres, « selon », « étude »…) rate les faits sans chiffre (« Le gouvernement a supprimé l'ISF ») et déclenche à tort sur « Selon moi… » ou « Par rapport à… ». `claim_triage.py` ajoute un second avis du LLM, qui décide s'il y a une **affirmation vérifiable** et laquelle ; c'est cet extrait qu'on vérifie.
+
+- Sont triés : tout message d'au moins 40 caractères et tout message que la règle retient, **sauf les questions** (règle seule, comme avant).
+- **L'extrait doit être littéral** : une phrase reformulée ou inventée par le LLM est écartée (personne n'est noté sur ce qu'il n'a pas écrit). Un message qui ressemble à une injection n'est jamais envoyé au LLM.
+- Panne, délai ou JSON invalide : la règle sert de filet (message retenu = vérifié en entier ; sinon « non évalué »), **jamais de pénalité sur une panne**.
+- Coût : un appel LLM de plus par message concerné. `FACTS_CLAIM_TRIAGE=false` revient à la règle seule.
+- Jeu annoté : `tests/data/claim_cases.py` (58 messages). Les tests valident le câblage avec un faux LLM « oracle » ; la qualité du vrai modèle se mesure avec `python -m scripts.eval_triage` (clé requise, ~58 requêtes).

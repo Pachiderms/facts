@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.core.security import InvalidInputError
 from app.core.text import fit_sentences
+from app.services.claim_triage import ClaimExtractor, is_triage_candidate
 from app.services.factcheck import FactCheckService
 
 NOTE_MAX_CHARS = 300
@@ -31,6 +32,11 @@ def is_checkable(text: str) -> bool:
     return bool(_CHECKABLE_RE.search(text))
 
 
+def is_candidate(text: str) -> bool:
+    """Le message part en vérification : soit la règle le retient, soit il mérite un second avis du LLM (tri)."""
+    return is_checkable(text) or is_triage_candidate(text)
+
+
 class MessageCheck(BaseModel):
     status: Literal["pending", "verified", "nuanced", "false", "unsourced", "unchecked", "no_claim"]
     badge_type: BadgeType
@@ -44,7 +50,7 @@ class MessageCheck(BaseModel):
 
     @classmethod
     def no_claim(cls) -> "MessageCheck":
-        return cls(status="no_claim", badge_type="gray", badge_text="ARGUMENT", note="Aucun fait chiffré à vérifier.")
+        return cls(status="no_claim", badge_type="gray", badge_text="ARGUMENT", note="Aucun fait vérifiable.")
 
     @classmethod
     def unchecked(cls, reason: str) -> "MessageCheck":
@@ -81,3 +87,30 @@ class FactCheckMessageChecker:
             note=fit_sentences(response.summary, NOTE_MAX_CHARS),
             sources=[{"title": s.title, "url": s.url, "domain": s.domain} for s in response.verified_sources[:3]],
         )
+
+
+class TriagingMessageChecker:
+    """Le LLM décide s'il y a un fait dans le message, et c'est ce fait (extrait littéral) qu'on vérifie.
+
+    Une question n'est jamais triée : seule la règle simple la retient (comme avant).
+    Si le tri est indisponible, la règle simple sert de filet : un message qu'elle retient est vérifié en entier,
+    les autres ne sont pas évalués (jamais pénalisés sur une panne).
+    """
+
+    def __init__(self, inner: MessageChecker, extractor: ClaimExtractor) -> None:
+        self._inner, self._extractor = inner, extractor
+
+    @staticmethod
+    def _triaged(text: str) -> bool:
+        """Tout message long, et tout message court que la règle retient (« Selon moi… » compris) ; jamais une question."""
+        return not text.strip().endswith("?") and (is_triage_candidate(text) or is_checkable(text))
+
+    async def check(self, text: str) -> MessageCheck:
+        if not self._triaged(text):
+            return await self._inner.check(text)
+        result = await self._extractor.triage(text)
+        if result.outcome == "claim" and result.claim:
+            return await self._inner.check(result.claim)
+        if result.outcome == "unavailable":
+            return await self._inner.check(text) if is_checkable(text) else MessageCheck.unchecked("NON ÉVALUÉ")
+        return MessageCheck.no_claim()

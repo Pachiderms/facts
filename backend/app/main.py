@@ -17,7 +17,8 @@ from app.core.cache import TTLCache
 from app.core.config import Settings, get_settings
 from app.core.security import SlidingWindowRateLimiter
 from app.services.factcheck import FactCheckService
-from app.services.message_checker import FactCheckMessageChecker
+from app.services.claim_triage import ClaimExtractor
+from app.services.message_checker import FactCheckMessageChecker, TriagingMessageChecker, is_candidate
 from app.services.moderation import ModerationLedger, Moderator
 from app.services.reformulation import ThemeReformulator
 from app.services.retrieval import Retriever
@@ -57,8 +58,14 @@ def build_moderator(settings: Settings, llm: OpenAICompatibleLLM | None) -> Mode
     return Moderator(llm, ledger, timeout_seconds=settings.moderation_timeout_seconds)
 
 
-def build_rooms(settings: Settings, service: FactCheckService, moderator: Moderator | None = None) -> RoomRegistry:
-    return RoomRegistry.seeded(FactCheckMessageChecker(service), settings, moderator)
+def build_rooms(
+    settings: Settings, service: FactCheckService, moderator: Moderator | None = None, llm: OpenAICompatibleLLM | None = None
+) -> RoomRegistry:
+    checker = FactCheckMessageChecker(service)
+    if settings.claim_triage and llm is not None:
+        extractor = ClaimExtractor(llm, timeout_seconds=settings.claim_triage_timeout_seconds)
+        return RoomRegistry.seeded(TriagingMessageChecker(checker, extractor), settings, moderator, checkable=is_candidate)
+    return RoomRegistry.seeded(checker, settings, moderator)
 
 
 def create_app(
@@ -78,7 +85,7 @@ def create_app(
             if app.state.reformulator is None:
                 app.state.reformulator = build_reformulator(settings, llm)
         if app.state.rooms is None:
-            app.state.rooms = build_rooms(settings, app.state.service, build_moderator(settings, llm))
+            app.state.rooms = build_rooms(settings, app.state.service, build_moderator(settings, llm), llm)
         yield
         await app.state.rooms.aclose()  # annule les vérifications en cours
         if llm is not None:

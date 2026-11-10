@@ -749,14 +749,21 @@ class RoomRegistry:
         await asyncio.gather(*(r.aclose() for r in self._rooms.values()))
 
     @classmethod
-    def seeded(cls, checker: MessageChecker, settings: Settings, moderator: Moderator | None = None) -> "RoomRegistry":
+    def seeded(
+        cls,
+        checker: MessageChecker,
+        settings: Settings,
+        moderator: Moderator | None = None,
+        checkable: Callable[[str], bool] | None = None,
+    ) -> "RoomRegistry":
         limits = CheckLimits(
             settings.ws_max_concurrent_checks, settings.ws_max_pending_checks, settings.ws_check_timeout_seconds
         )
 
         def factory(**kw: Any) -> Room:
+            extra = {"checkable": checkable} if checkable is not None else {}
             return Room(
-                checker=checker, limits=limits,
+                checker=checker, limits=limits, **extra,
                 max_message_chars=settings.ws_max_message_chars, max_clients=settings.ws_max_room_connections, moderator=moderator, **kw,
             )
 
