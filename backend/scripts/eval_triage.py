@@ -27,7 +27,13 @@ def report(name: str, predictions: dict[str, bool]) -> None:
 
 async def main() -> None:
     s = get_settings()
-    llm = OpenAICompatibleLLM(s.llm_base_url, s.llm_model, s.llm_api_key, s.llm_timeout_seconds, s.llm_reasoning_effort)
+    llm = OpenAICompatibleLLM(
+        base_url=s.llm_base_url,
+        model=s.llm_model,
+        api_key=s.llm_api_key,
+        timeout_seconds=s.llm_timeout_seconds,
+        reasoning_effort=s.llm_reasoning_effort,
+    )
     extractor, triaged, unavailable = ClaimExtractor(llm), {}, 0
     try:
         for c in CASES:
