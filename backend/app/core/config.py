@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     daily_check_limit: int = 30
     daily_ws_message_limit: int = 200
 
+    # Tri des messages par le LLM : repère les faits sans chiffre. Coûte un appel LLM par message long sans chiffre ;
+    # désactiver (FACTS_CLAIM_TRIAGE=false) pour revenir à la règle gratuite seule.
+    claim_triage: bool = True
+    claim_triage_timeout_seconds: float = 10.0
+
     # LLM (API compatible OpenAI)
     llm_base_url: str = "https://api.groq.com/openai/v1"
     llm_api_key: str = ""
