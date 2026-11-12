@@ -85,3 +85,36 @@ def test_health_reports_uptime_so_restarts_are_visible(prod_client):
     assert isinstance(first["uptime_seconds"], int) and first["uptime_seconds"] >= 0
     prod_client.app.state.started -= 3600  # on simule une heure de fonctionnement
     assert prod_client.get("/health").json()["uptime_seconds"] >= 3600
+
+
+KEEPALIVE = (ROOT / ".github" / "workflows" / "keepalive.yml").read_text(encoding="utf-8")
+
+
+def test_keepalive_is_off_unless_the_repo_variable_says_true():
+    # Sans la variable KEEPALIVE_ENABLED=true, le job est ignoré : aucun appel, aucune heure Render consommée.
+    assert "if: ${{ vars.KEEPALIVE_ENABLED == 'true' }}" in KEEPALIVE
+    assert "workflow_dispatch" in KEEPALIVE  # déclenchement manuel possible
+
+
+def test_keepalive_has_no_secret_and_minimal_permissions():
+    assert "secrets." not in KEEPALIVE
+    assert "permissions: {}" in KEEPALIVE
+    assert "actions/checkout" not in KEEPALIVE  # aucun code du dépôt n'est exécuté
+
+
+def test_keepalive_passes_url_through_env_not_shell_interpolation():
+    # Une variable interpolée dans le script shell permettrait d'y injecter des commandes.
+    run = KEEPALIVE.split("run: |", 1)[1]
+    assert "${{" not in run
+    assert 'API_URL: ${{ vars.FACTS_API_URL }}' in KEEPALIVE
+    assert "https://*)" in run  # refuse une URL non HTTPS
+
+
+def test_keepalive_only_calls_health_with_a_timeout_and_runs_within_render_budget():
+    assert "/health" in KEEPALIVE and "--max-time" in KEEPALIVE
+    cron = [line for line in KEEPALIVE.splitlines() if line.strip().startswith("- cron:")]
+    assert len(cron) == 1
+    minute, hours, *_ = cron[0].split('"')[1].split()
+    assert minute == "*/10"
+    start, end = (int(h) for h in hours.split("-"))
+    assert (end - start + 1) * 31 < 700  # reste sous les 750 h gratuites/mois, avec marge

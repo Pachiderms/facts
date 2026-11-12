@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     llm_reasoning_effort: str = ""  # "low" recommandé avec les modèles gpt-oss ; vide = non envoyé
     llm_timeout_seconds: float = 30.0
 
+    # Saisie vocale (Groq Whisper). Désactivée sans clé. Offre gratuite Groq : ~28 800 s d'audio par jour.
+    stt_enabled: bool = True
+    stt_base_url: str = "https://api.groq.com/openai/v1"
+    stt_api_key: str = ""  # vide = réutilise llm_api_key (même compte Groq)
+    stt_model: str = "whisper-large-v3-turbo"
+    stt_timeout_seconds: float = 20.0
+    stt_max_bytes: int = 1_000_000  # 30 s d'audio compressé tiennent dans ~250 Ko ; marge x4
+    stt_max_seconds: float = 30.0
+    stt_daily_per_person: int = 20
+    stt_daily_per_ip: int = 60  # plafond large : plusieurs personnes peuvent partager une IP
+    stt_per_minute: int = 6
+    stt_global_daily_seconds: int = 20_000  # reste sous les 28 800 s/jour de Groq
+
     # Débats en direct (WebSocket)
     ws_max_message_chars: int = 500  # aligné sur assertion_max_chars : un message est vérifié comme une assertion
     ws_messages_per_minute: int = 12
@@ -85,6 +98,14 @@ class Settings(BaseSettings):
     room_title_max_chars: int = 120
     room_code_max_failures: int = 5  # codes faux tolérés ...
     room_code_window_seconds: int = 600  # ... par IP sur cette fenêtre (anti-force brute)
+
+    @property
+    def stt_key(self) -> str:
+        return self.stt_api_key or self.llm_api_key
+
+    @property
+    def voice_available(self) -> bool:
+        return self.stt_enabled and bool(self.stt_key)
 
     @property
     def cors_origin_list(self) -> list[str]:
