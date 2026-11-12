@@ -21,7 +21,7 @@ export function useRoom(roomId: string, code?: string, spectate = false) {
     }
   }, [roomId, code, spectate])
 
-  const send = useCallback((text: string): boolean => socket.current?.send(text) ?? false, [])
+  const send = useCallback((text: string, replyTo: number | null = null): boolean => socket.current?.send(text, replyTo) ?? false, [])
   const dismissNotice = useCallback(() => dispatch({ type: 'dismiss_notice' }), [])
   const dismissWarning = useCallback(() => dispatch({ type: 'dismiss_warning' }), [])
   const dismissReportNotice = useCallback(() => dispatch({ type: 'dismiss_report_notice' }), [])

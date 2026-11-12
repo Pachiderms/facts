@@ -1,4 +1,4 @@
-import { MessageSquare, Send } from 'lucide-react'
+import { CornerUpLeft, MessageSquare, Send, X } from 'lucide-react'
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type { SocketStatus } from '../../api/socket'
 import { MESSAGE_MAX, type Role } from '../../api/types'
@@ -13,6 +13,10 @@ interface Props {
   onSend: (text: string) => boolean
   /** Affiche le bouton de dictée (navigateur compatible et serveur configuré). */
   voiceEnabled?: boolean
+  onSend: (text: string, replyTo: number | null) => boolean
+  /** Message auquel on répond (déjà prêt à afficher), ou null. */
+  replyTo?: { id: number; speaker: number; preview: string } | null
+  onCancelReply?: () => void
 }
 
 const HINT_STYLES = {
@@ -22,6 +26,7 @@ const HINT_STYLES = {
 } as const
 
 export function Composer({ role, number = null, status, onSend, voiceEnabled = false }: Props) {
+export function Composer({ role, number = null, status, onSend, replyTo = null, onCancelReply }: Props) {
   const [text, setText] = useState('')
   const [failed, setFailed] = useState(false)
   const fieldId = useId()
@@ -39,15 +44,21 @@ export function Composer({ role, number = null, status, onSend, voiceEnabled = f
   const send = (e?: FormEvent) => {
     e?.preventDefault()
     if (!canSend) return
-    if (onSend(trimmed)) {
+    if (onSend(trimmed, replyTo?.id ?? null)) {
       setText('')
       setFailed(false)
+      onCancelReply?.()
     } else {
       setFailed(true) // connexion perdue entre-temps : on garde le texte saisi
     }
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape' && replyTo) {
+      e.preventDefault()
+      onCancelReply?.()
+      return
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
@@ -72,6 +83,23 @@ export function Composer({ role, number = null, status, onSend, voiceEnabled = f
         </p>
       ) : (
         <form onSubmit={send} className="space-y-3">
+          {replyTo && (
+            <div className="flex items-start gap-2 rounded-lg border-l-4 border-neutral-400 bg-neutral-50 px-3 py-2 text-[11px] text-neutral-600">
+              <CornerUpLeft className="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" aria-hidden="true" />
+              <p className="min-w-0 flex-1">
+                <span className="block font-bold text-neutral-700">Réponse à Participant {replyTo.speaker}</span>
+                <span className="block break-words">{replyTo.preview}</span>
+              </p>
+              <button
+                type="button"
+                onClick={onCancelReply}
+                aria-label="Annuler la réponse"
+                className="rounded p-0.5 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          )}
           <label htmlFor={fieldId} className="sr-only">
             Votre argument
           </label>

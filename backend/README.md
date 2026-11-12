@@ -207,3 +207,10 @@ La règle gratuite (`is_checkable` : chiffres, « selon », « étude »…) rat
 - Plafonds : 1 Mo par envoi (lu en flux, même sans `Content-Length`), 6 requêtes/min par IP, **20 messages vocaux par personne et par jour**, 60 par IP et par jour, et un **budget global de 20 000 s d'audio par jour** (Groq offre ~28 800 s) au-delà duquel la voix se ferme pour tous (503) sans bloquer le compte Groq. Chaque requête compte 10 s minimum, comme chez Groq.
 - Durée réelle lue dans la réponse du fournisseur : > 33 s refusé. Segments de silence et phrases fantômes de Whisper (« Sous-titres réalisés par… ») écartés ; transcription nettoyée et plafonnée à 2 000 caractères.
 - Réglages : `FACTS_STT_ENABLED`, `FACTS_STT_API_KEY` (vide = réutilise `FACTS_LLM_API_KEY`), `FACTS_STT_MODEL`, `FACTS_STT_DAILY_PER_PERSON`, `FACTS_STT_GLOBAL_DAILY_SECONDS`… Sans clé, la voix est simplement désactivée.
+### Répondre à un message (PR F)
+
+`{"type":"message","text":"…","reply_to":<id>}` : `reply_to` est un entier strict (optionnel). Le serveur **vérifie** que le message existe dans l'historique du salon et n'a pas été retiré, puis reprend **lui-même** le numéro de l'auteur et un aperçu (120 caractères) : le client ne peut pas faire dire n'importe quoi à quelqu'un. Un identifiant inconnu ou un message retiré est refusé (`invalid_message`) et rien n'est publié.
+
+- **Contexte de vérification** : le message cité (nettoyé, 300 caractères au plus, ignoré s'il ressemble à une injection) est transmis au tri et au vérificateur dans une balise `<CONTEXT>` / `<CONTEXT_MESSAGE>`. Il sert uniquement à comprendre « cela », « cette loi », « en 2017 » : il n'est ni vérifié, ni cité comme source, ni utilisé comme preuve, et le tri ne peut jamais en extraire un fragment (l'extrait doit venir du message). Le contexte fait partie de la clé de cache.
+- **Réponses elliptiques** (« C'est faux. ») : pas de reformulation par le LLM. Sans fait énoncé par l'auteur, elles restent non vérifiables.
+- Quand un message est retiré par la modération, l'aperçu des réponses existantes est remplacé par « [Message retiré par la modération] ».

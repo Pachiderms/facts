@@ -98,6 +98,17 @@ describe('RoomSocket', () => {
     expect(events).toHaveLength(1)
   })
 
+  it('envoie reply_to seulement pour une réponse', () => {
+    socket.connect()
+    current().open()
+    socket.send('Un argument.')
+    socket.send('Une réponse.', 7)
+    expect(current().sent.slice(1).map((x) => JSON.parse(x))).toEqual([
+      { type: 'message', text: 'Un argument.' },
+      { type: 'message', text: 'Une réponse.', reply_to: 7 },
+    ])
+  })
+
   it('envoie kick, vote et take_seat au format attendu (et refuse hors connexion ouverte)', () => {
     socket.connect()
     expect(socket.kick(2)).toBe(false)

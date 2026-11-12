@@ -131,3 +131,9 @@ export function formatDuration(seconds: number): string {
   if (s >= 60) return `${Math.ceil(s / 60)} min`
   return `${s} s`
 }
+
+/** Aperçu d'un message cité dans le composeur (le serveur calcule le sien pour les réponses publiées). */
+export function quotePreview(text: string, limit = 120): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1).trimEnd()}…`
+}

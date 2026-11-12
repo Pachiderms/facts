@@ -10,6 +10,7 @@ domaine et le score de confiance sont ceux calculés par NOTRE code ; sans sourc
 aucun verdict tranché n'est publié.
 """
 
+import hashlib
 import logging
 
 from pydantic import ValidationError
@@ -102,37 +103,43 @@ class FactCheckService:
         self._max_chars = assertion_max_chars
 
     @staticmethod
-    def _cache_key(assertion: str, institutional_filter: bool) -> str:
-        return f"{int(institutional_filter)}:{assertion.casefold()}"
+    def _cache_key(assertion: str, institutional_filter: bool, context: str | None = None) -> str:
+        # Le contexte change le sens d'une réponse (« c'est faux ») : il fait partie de la clé de cache.
+        ctx = hashlib.sha256(context.casefold().encode()).hexdigest()[:16] if context else ""
+        return f"{int(institutional_filter)}:{ctx}:{assertion.casefold()}"
 
-    async def check(self, assertion: str, institutional_filter: bool = True) -> CheckResponse:
+    async def check(self, assertion: str, institutional_filter: bool = True, context: str | None = None) -> CheckResponse:
         clean = sanitize_text(assertion, self._max_chars)
         if looks_like_prompt_injection(assertion) or looks_like_prompt_injection(clean):
             raise PromptInjectionError("Assertion refusée : elle ne ressemble pas à une affirmation vérifiable.")
 
-        key = self._cache_key(clean, institutional_filter)
+        if context is not None:
+            context = sanitize_text(context, 400)
+            if looks_like_prompt_injection(context):
+                context = None  # un contexte douteux est ignoré, la vérification se fait sans lui
+        key = self._cache_key(clean, institutional_filter, context)
         hit = self._cache.get(key)
         if hit is not None:
             return hit.model_copy(update={"cached": True})
 
-        queries = await self._generate_queries(clean)
+        queries = await self._generate_queries(clean, context)
         results = await self._retriever.retrieve(queries, institutional_priority=institutional_filter)
         if not results:
             # Pas de contexte -> on n'interroge même pas le LLM (zéro risque d'hallucination).
             return _unverifiable("Aucune source web n'a été trouvée pour cette assertion.")
 
-        analysis = await self._analyze(clean, results)
+        analysis = await self._analyze(clean, results, context)
         response = finalize_analysis(analysis, results)
         if response.verified_sources:  # on ne met pas en cache les échecs : l'utilisateur peut réessayer
             self._cache.set(key, response)
         return response
 
-    async def _generate_queries(self, assertion: str) -> list[str]:
+    async def _generate_queries(self, assertion: str, context: str | None = None) -> list[str]:
         """Étape 1. Toute défaillance du SLM ici est non bloquante : repli sur l'assertion."""
         fallback = [assertion[:MAX_QUERY_CHARS]]
         try:
             raw = await self._llm.complete(
-                QUERY_SYSTEM_PROMPT, build_query_user_prompt(assertion), json_mode=True, max_tokens=500
+                QUERY_SYSTEM_PROMPT, build_query_user_prompt(assertion, context), json_mode=True, max_tokens=500
             )
             candidates = parse_json_object(raw).get("queries")
         except LLMRateLimitError:
@@ -153,9 +160,9 @@ class FactCheckService:
                 continue
         return queries[:2] or fallback
 
-    async def _analyze(self, assertion: str, results: list[SearchResult]) -> LLMAnalysis:
+    async def _analyze(self, assertion: str, results: list[SearchResult], context: str | None = None) -> LLMAnalysis:
         """Étape 3. Une nouvelle tentative si le JSON est invalide ; les erreurs réseau/quota remontent."""
-        user_prompt = build_analysis_user_prompt(assertion, results)
+        user_prompt = build_analysis_user_prompt(assertion, results, context)
         for attempt in range(1, ANALYSIS_ATTEMPTS + 1):
             raw = await self._llm.complete(ANALYSIS_SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=2500)
             try:

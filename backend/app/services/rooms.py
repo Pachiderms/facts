@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import Settings
-from app.core.security import sanitize_text
-from app.services.message_checker import MessageCheck, MessageChecker, is_checkable
+from app.core.security import InvalidInputError, sanitize_text
+from app.services.message_checker import MessageCheck, MessageChecker, is_checkable, reply_context, reply_preview
 from app.services.moderation import MAX_STRIKES, REMOVED_TEXT, Moderator, Sanction
 from app.services.trust import WEIGHTS, compute_trust_score, trust_delta
 
@@ -460,11 +460,12 @@ class Room:
             return False
 
     # ---------- messages ----------
-    async def post_message(self, client: Client, text: str) -> dict[str, Any] | None:
+    async def post_message(self, client: Client, text: str, reply_to: int | None = None) -> dict[str, Any] | None:
         """Publie le message. Renvoie None s'il est refusé par la modération (l'auteur est prévenu)."""
         if client.role == "spectator":
             raise NotAllowedError("Les spectateurs ne peuvent pas intervenir.")
         clean = sanitize_text(text, self._max_chars)  # lève InvalidInputError si vide / trop long
+        quoted = self._quoted(reply_to)  # lève InvalidInputError si le message cité n'existe plus
         self.last_activity = self._clock()
 
         if self._moderator is not None:
@@ -492,6 +493,8 @@ class Room:
             "text": clean,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "check": (MessageCheck.pending() if needs_check else MessageCheck.no_claim()).model_dump(),
+            # Citation : numéro de l'auteur et aperçu repris du message d'origine par le SERVEUR (jamais fourni par le client).
+            "reply_to": None if quoted is None else {"id": quoted["id"], "speaker": quoted["speaker"], "preview": reply_preview(quoted["text"])},
         }
         self.messages.append(message)
         self._authors[message["id"]] = client.participant_id or client.id
@@ -502,12 +505,24 @@ class Room:
         await self.broadcast({"type": "message", "message": copy.deepcopy(message), "trust_score": self.trust_score})
 
         if needs_check:
-            task = asyncio.create_task(self._run_check(message))
+            context = reply_context(quoted["text"]) if quoted is not None else None
+            task = asyncio.create_task(self._run_check(message, context))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
         return message
 
-    async def _run_check(self, message: dict[str, Any]) -> None:
+    def _quoted(self, reply_to: int | None) -> dict[str, Any] | None:
+        """Le message cité : il doit exister dans l'historique du salon et ne pas avoir été retiré."""
+        if reply_to is None:
+            return None
+        for m in self.messages:
+            if m["id"] == reply_to:
+                if m.get("removed"):
+                    raise InvalidInputError("Ce message a été retiré : impossible d'y répondre.")
+                return m
+        raise InvalidInputError("Le message auquel vous répondez n'existe plus.")
+
+    async def _run_check(self, message: dict[str, Any], context: str | None = None) -> None:
         limits = self._limits
         if limits.pending >= limits.max_pending:
             check = MessageCheck.unchecked("FILE D'ATTENTE PLEINE")
@@ -515,7 +530,8 @@ class Room:
             limits.pending += 1
             try:
                 async with limits.semaphore:
-                    check = await asyncio.wait_for(self._checker.check(message["text"]), limits.timeout)
+                    call = self._checker.check(message["text"]) if context is None else self._checker.check(message["text"], context=context)
+                    check = await asyncio.wait_for(call, limits.timeout)
             except Exception:  # CancelledError n'est pas une Exception : l'arrêt propre reste possible
                 logger.warning("vérification du message %s indisponible", message["id"])
                 check = MessageCheck.unchecked("VÉRIFICATION INDISPONIBLE")
@@ -629,6 +645,9 @@ class Room:
             if pc is not None and pc[status] > 0:
                 pc[status] -= 1
         message.update({"removed": True, "text": REMOVED_TEXT, "check": MessageCheck.no_claim().model_dump()})
+        for other in self.messages:  # les réponses ne doivent pas continuer à afficher le propos retiré
+            if other.get("reply_to") and other["reply_to"]["id"] == message_id:
+                other["reply_to"]["preview"] = REMOVED_TEXT
         await self.broadcast(
             {"type": "message_removed", "message_id": message_id, "text": REMOVED_TEXT, "trust_score": self.trust_score,
              "trust_delta": trust_delta(old, self.trust_score)}

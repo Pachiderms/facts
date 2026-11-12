@@ -177,11 +177,13 @@ export function roomReducer(state: RoomState, action: RoomAction): RoomState {
         case 'message_removed':
           return {
             ...state,
-            messages: state.messages.map((m) =>
-              m.id === event.message_id
-                ? { ...m, text: event.text, removed: true, check: { ...m.check, status: 'no_claim', badge_type: 'gray', badge_text: 'RETIRÉ', note: '', sources: [] } }
-                : m,
-            ),
+            messages: state.messages.map((m) => {
+              if (m.id === event.message_id) {
+                return { ...m, text: event.text, removed: true, check: { ...m.check, status: 'no_claim', badge_type: 'gray', badge_text: 'RETIRÉ', note: '', sources: [] } }
+              }
+              // Les réponses ne doivent plus afficher le propos retiré.
+              return m.reply_to?.id === event.message_id ? { ...m, reply_to: { ...m.reply_to, preview: event.text } } : m
+            }),
             trustScore: event.trust_score,
             deltas: Object.fromEntries(Object.entries(state.deltas).filter(([id]) => Number(id) !== event.message_id)),
           }
