@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     db_pool_size: int = 3
     db_max_overflow: int = 2
 
+    # Comptes (optionnels). Actifs si la base ET l'identifiant client Google sont renseignés (identifiant PUBLIC).
+    google_client_id: str = ""
+    session_ttl_days: int = 30
+    max_sessions_per_user: int = 10
+    google_max_token_age_seconds: int = 600
+    login_attempts_per_window: int = 10  # par IP
+    login_window_seconds: int = 600
+
     # Limites d'entrée
     assertion_min_chars: int = 10
     assertion_max_chars: int = 500
@@ -109,6 +117,10 @@ class Settings(BaseSettings):
     @property
     def stt_key(self) -> str:
         return self.stt_api_key or self.llm_api_key
+
+    @property
+    def accounts_available(self) -> bool:
+        return bool(self.google_client_id.strip()) and bool(self.database_url.get_secret_value())
 
     @property
     def voice_available(self) -> bool:

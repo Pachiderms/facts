@@ -1,5 +1,6 @@
 import { Bot, Flame, Scale } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { AccountMenu } from './AccountMenu'
 
 export type PageId = 'check' | 'arena'
 
@@ -20,7 +21,7 @@ export function Header({ page, onNavigate }: { page: PageId; onNavigate: (page: 
             F
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="font-mono text-xl font-extrabold tracking-tight text-neutral-900">
+            <span className="hidden font-mono text-xl font-extrabold tracking-tight text-neutral-900 sm:block">
               Facts<span className="text-neutral-400">.</span>
             </span>
             <span className="hidden text-[10px] font-medium uppercase tracking-wider text-neutral-500 sm:block">
@@ -51,7 +52,9 @@ export function Header({ page, onNavigate }: { page: PageId; onNavigate: (page: 
           })}
         </nav>
 
-        <div className="hidden items-center space-x-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs text-neutral-600 lg:flex">
+        <AccountMenu />
+
+        <div className="hidden items-center space-x-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs text-neutral-600 xl:flex">
           <Scale className="h-3.5 w-3.5 text-neutral-500" aria-hidden="true" />
           <span>
             Recherche web en direct · <strong className="text-neutral-900">sources classées par type</strong>

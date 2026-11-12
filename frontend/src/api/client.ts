@@ -254,15 +254,41 @@ export function warmUp(): void {
   void fetch(`${apiBase()}/health`).catch(() => undefined)
 }
 
+export interface Features {
+  voice: boolean
+  accounts: boolean
+  /** Identifiant client Google : PUBLIC (il figure dans le bouton de connexion), jamais un secret. */
+  googleClientId: string | null
+}
+
+const NO_FEATURES: Features = { voice: false, accounts: false, googleClientId: null }
+
 /** Fonctions optionnelles du serveur. Toute erreur = fonction absente : l'interface se replie sur le texte. */
-export async function fetchFeatures(signal?: AbortSignal): Promise<{ voice: boolean }> {
+export async function fetchFeatures(signal?: AbortSignal): Promise<Features> {
   try {
     const response = await request('/api/v1/features', { signal }, 10_000)
     const data: unknown = response.ok ? await response.json().catch(() => null) : null
-    return { voice: isRecord(data) && data.voice === true }
+    if (!isRecord(data)) return NO_FEATURES
+    const id = typeof data.google_client_id === 'string' && data.google_client_id ? data.google_client_id : null
+    return { voice: data.voice === true, accounts: data.accounts === true && id !== null, googleClientId: id }
   } catch {
-    return { voice: false }
+    return NO_FEATURES
   }
+}
+
+let featuresPromise: Promise<Features> | null = null
+
+/** Une seule requête par chargement de page, partagée par tous les composants. Un échec n'est pas mémorisé. */
+export function getFeatures(): Promise<Features> {
+  featuresPromise ??= fetchFeatures().then((f) => {
+    if (f === NO_FEATURES) featuresPromise = null
+    return f
+  })
+  return featuresPromise
+}
+
+export function resetFeaturesCache(): void {
+  featuresPromise = null
 }
 
 const TRANSCRIBE_TIMEOUT_MS = 40_000
@@ -283,4 +309,70 @@ export async function transcribeAudio(audio: Blob, signal?: AbortSignal): Promis
   const data: unknown = await response.json().catch(() => null)
   if (!isRecord(data) || typeof data.text !== 'string' || !data.text.trim()) throw BAD_RESPONSE()
   return data.text
+}
+
+// ---------- comptes (facultatifs) ----------
+export interface AccountUser {
+  id: string
+  email: string
+  created_at: string
+}
+
+const authHeader = (token: string) => ({ Authorization: `Bearer ${token}` })
+
+const isUser = (v: unknown): v is AccountUser =>
+  isRecord(v) && typeof v.id === 'string' && typeof v.email === 'string' && typeof v.created_at === 'string'
+
+const SESSION_RE = /^[A-Za-z0-9_-]{43}$/
+
+/** Échange le jeton Google contre une session. Le jeton anonyme est rattaché au compte (historique conservé). */
+export async function loginWithGoogle(credential: string): Promise<{ sessionToken: string; user: AccountUser }> {
+  const response = await request(
+    '/api/v1/auth/google',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential, participant_token: getParticipantToken() }),
+    },
+    20_000,
+  )
+  if (!response.ok) throw await toApiError(response, 'Connexion impossible. Réessayez.')
+  const data: unknown = await response.json().catch(() => null)
+  if (!isRecord(data) || typeof data.session_token !== 'string' || !SESSION_RE.test(data.session_token) || !isUser(data.user)) {
+    throw BAD_RESPONSE()
+  }
+  return { sessionToken: data.session_token, user: data.user }
+}
+
+export async function fetchMe(token: string, signal?: AbortSignal): Promise<AccountUser> {
+  const response = await request('/api/v1/auth/me', { headers: authHeader(token), signal }, 20_000)
+  if (!response.ok) throw await toApiError(response)
+  const data: unknown = await response.json().catch(() => null)
+  if (!isRecord(data) || !isUser(data.user)) throw BAD_RESPONSE()
+  return data.user
+}
+
+async function authPost(path: string, token: string, body?: unknown): Promise<unknown> {
+  const response = await request(
+    path,
+    {
+      method: 'POST',
+      headers: { ...authHeader(token), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    },
+    20_000,
+  )
+  if (!response.ok) throw await toApiError(response)
+  return response.json().catch(() => null)
+}
+
+export const logoutSession = (token: string) => authPost('/api/v1/auth/logout', token)
+export const logoutEverywhere = (token: string) => authPost('/api/v1/auth/logout-all', token)
+export const deleteAccount = (token: string) => authPost('/api/v1/auth/delete', token, { confirm: true })
+
+/** Toutes les données conservées sur le compte, en JSON (droit d'accès). */
+export async function exportAccount(token: string): Promise<Blob> {
+  const response = await request('/api/v1/auth/export', { headers: authHeader(token) }, 20_000)
+  if (!response.ok) throw await toApiError(response)
+  return new Blob([await response.text()], { type: 'application/json' })
 }

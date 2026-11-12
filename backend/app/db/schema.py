@@ -1,6 +1,8 @@
 """Schéma (SQLAlchemy Core). Toute évolution passe par une migration Alembic (`migrations/versions`)."""
 
-from sqlalchemy import Column, DateTime, MetaData, String, Table, func
+import uuid
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, MetaData, String, Table, Uuid, func
 
 # Noms de contraintes prévisibles : les migrations peuvent les retrouver et les supprimer.
 metadata = MetaData(
@@ -20,4 +22,41 @@ app_meta = Table(
     Column("key", String(64), primary_key=True),
     Column("value", String(1024), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+
+# Comptes (optionnels : sans compte, l'identité reste le jeton anonyme du navigateur).
+# Données minimales : l'adresse e-mail et l'identifiant Google (« sub »). Ni nom, ni photo.
+users = Table(
+    "users",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()),
+    Column("google_sub", String(255), nullable=False, unique=True),
+    Column("email", String(320), nullable=False, unique=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("last_login_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+# Sessions révocables : on ne garde que l'empreinte SHA-256 du jeton (une fuite de la base ne donne aucune session).
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("token_hash", String(64), nullable=False, unique=True),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Index("ix_sessions_user_id", "user_id"),
+)
+
+# Identités anonymes rattachées à un compte (empreinte du jeton du navigateur, voir core/identity.py).
+# Une identité n'appartient qu'à un seul compte.
+user_participants = Table(
+    "user_participants",
+    metadata,
+    Column("participant_id", String(16), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+    Column("linked_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Index("ix_user_participants_user_id", "user_id"),
 )

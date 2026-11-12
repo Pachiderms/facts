@@ -7,3 +7,4 @@ ddgs>=9.0
 sqlalchemy[asyncio]>=2.0,<3
 asyncpg>=0.29
 alembic>=1.13
+pyjwt[crypto]>=2.8

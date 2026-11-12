@@ -196,11 +196,11 @@ describe('client vocal', () => {
 
   it('fetchFeatures retombe sur « sans voix » en cas d’erreur ou de réponse hors contrat', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('réseau'))
-    expect(await fetchFeatures()).toEqual({ voice: false })
+    expect((await fetchFeatures()).voice).toBe(false)
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({ voice: 'yes' }))
-    expect(await fetchFeatures()).toEqual({ voice: false })
+    expect((await fetchFeatures()).voice).toBe(false)
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(jsonResponse({ voice: true }))
-    expect(await fetchFeatures()).toEqual({ voice: true })
+    expect((await fetchFeatures()).voice).toBe(true)
   })
 
   it('transcribeAudio rejette une réponse sans texte', async () => {
