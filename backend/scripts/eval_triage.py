@@ -2,7 +2,7 @@
 
     FACTS_LLM_API_KEY=... python -m scripts.eval_triage          (depuis backend/)
 
-Consomme ~58 requêtes LLM (quota gratuit). Affiche rappel / précision de la règle seule et du tri, et les messages ratés.
+Consomme ~61 requêtes LLM (quota gratuit) : compter environ 7 minutes (pause de 7 s entre deux requêtes). Affiche rappel / précision de la règle seule et du tri, et les messages ratés.
 """
 
 import asyncio
@@ -40,7 +40,7 @@ async def main() -> None:
             r = await extractor.triage(c.text)
             unavailable += r.outcome == "unavailable"
             triaged[c.text] = r.outcome == "claim"
-            await asyncio.sleep(2.5)  # reste sous 30 requêtes/minute
+            await asyncio.sleep(7)  # le plafond Groq en jetons (~8 000/min) est atteint avant celui des requêtes (30/min)
     finally:
         await llm.aclose()
     report("règle seule", {c.text: is_checkable(c.text) for c in CASES})

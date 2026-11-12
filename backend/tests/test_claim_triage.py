@@ -285,3 +285,11 @@ async def test_unusable_answer_on_a_figureless_message_is_not_evaluated_not_pena
     checker, inner, _ = make_checker({"claim": "phrase inventée"})
     result = await checker.check("Le gouvernement a supprimé l'impôt sur la fortune sans contrepartie.")
     assert result.status == "unchecked" and not inner.calls
+
+
+async def test_rate_limit_is_unavailable_and_never_retried():
+    from app.adapters.llm import LLMRateLimitError
+
+    llm = ScriptedLLM(LLMRateLimitError("429"), {"claim": FACT})  # la 2e réponse ne doit jamais être consommée
+    assert (await ClaimExtractor(llm).triage(FACT)).outcome == "unavailable"
+    assert len(llm.calls) == 1

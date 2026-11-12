@@ -21,7 +21,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.adapters.llm import LLMError, LLMProvider, parse_json_object
+from app.adapters.llm import LLMError, LLMProvider, LLMRateLimitError, parse_json_object
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
 
 logger = logging.getLogger("facts.triage")
@@ -88,6 +88,10 @@ class ClaimExtractor:
                 break
             except asyncio.TimeoutError:
                 logger.warning("tri des affirmations : délai dépassé")
+                return TriageResult("unavailable")
+            except LLMRateLimitError:
+                # Quota atteint : réessayer immédiatement double la consommation sans rien obtenir.
+                logger.warning("tri des affirmations : quota du fournisseur atteint")
                 return TriageResult("unavailable")
             except (LLMError, ValidationError, json.JSONDecodeError) as exc:
                 logger.warning("tri des affirmations : réponse invalide (%s, essai %d/%d)", type(exc).__name__, attempt, ATTEMPTS)
