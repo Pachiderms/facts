@@ -18,7 +18,7 @@ Garde-fous déjà dans le code : 50 salons maximum, 3 créations par jour et par
 - **Tavily** (recherche, optionnelle) : 1 000 crédits/mois. Sans clé, l'API utilise Wikipédia puis DuckDuckGo.
 
 ### 2. API sur Render
-1. Render → **New → Blueprint** → choisir le dépôt `Pachiderms/facts` : `render.yaml` crée le service `facts-api`.
+1. Render → **New → Blueprint** → choisir le dépôt `Pachiderms/facts` : `render.yaml` crée le service `facts-api-eu` (nom propre à ce service ; Render refuse un nom déjà pris dans votre espace, même suspendu).
 2. Saisir les trois variables « à renseigner » : `FACTS_LLM_API_KEY`, `FACTS_TAVILY_API_KEY` (peut rester vide), `FACTS_CORS_ORIGINS` (laisser vide pour l'instant, voir l'étape 4).
 3. Une fois déployé, noter l'adresse, par exemple `https://facts-api.onrender.com`. Vérifier : `https://facts-api.onrender.com/health` répond `{"status":"ok"}`.
 
