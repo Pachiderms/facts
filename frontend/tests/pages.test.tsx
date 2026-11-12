@@ -504,7 +504,7 @@ describe('RoomPage (une room = une page)', () => {
     hooks.useRoom.mockReturnValue(roomState({ send }))
     render(<RoomPage id="room-1" />)
     await userEvent.type(screen.getByRole('textbox', { name: 'Votre argument' }), 'Selon l’INSEE, 5 %{Enter}')
-    expect(send).toHaveBeenCalledWith('Selon l’INSEE, 5 %')
+    expect(send).toHaveBeenCalledWith('Selon l’INSEE, 5 %', null)
   })
 
   it('état « reconnexion » visible ; envoi bloqué', async () => {
@@ -656,6 +656,39 @@ describe('RoomPage : modération', () => {
     hooks.useRoom.mockReturnValue(roomState({ role: 'spectator', you: null, messages: [mk(1, 1), mk(2, 2)] }))
     render(<RoomPage id="room-1" />)
     expect(screen.getAllByRole('button', { name: /Signaler/ })).toHaveLength(2)
+  })
+
+  it('répondre à un message : citation dans le composeur, envoi avec l’identifiant, puis fermeture', async () => {
+    const send = vi.fn().mockReturnValue(true)
+    const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+    const mk = (id: number, speaker: number) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', you: 1, send, messages: [mk(1, 1), mk(2, 2)] }))
+    render(<RoomPage id="room-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Répondre au message de Participant 2' }))
+    expect(screen.getByText('Réponse à Participant 2')).toBeInTheDocument()
+    await userEvent.type(screen.getByRole('textbox', { name: 'Votre argument' }), 'Je ne suis pas d’accord{Enter}')
+    expect(send).toHaveBeenCalledWith('Je ne suis pas d’accord', 2)
+    expect(screen.queryByText('Réponse à Participant 2')).not.toBeInTheDocument()
+  })
+
+  it('la citation disparaît si le message visé est retiré pendant la saisie', async () => {
+    const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+    const mk = (id: number, speaker: number, extra = {}) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check, ...extra })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', you: 1, messages: [mk(1, 1), mk(2, 2)] }))
+    const { rerender } = render(<RoomPage id="room-1" />)
+    await userEvent.click(screen.getByRole('button', { name: 'Répondre au message de Participant 2' }))
+    expect(screen.getByText('Réponse à Participant 2')).toBeInTheDocument()
+    hooks.useRoom.mockReturnValue(roomState({ role: 'A', you: 1, messages: [mk(1, 1), mk(2, 2, { removed: true, text: '[Message retiré par la modération]' })] }))
+    rerender(<RoomPage id="room-1" />)
+    expect(screen.queryByText('Réponse à Participant 2')).not.toBeInTheDocument()
+  })
+
+  it('un spectateur ne voit aucun bouton Répondre', () => {
+    const check = { status: 'no_claim', badge_type: 'gray', badge_text: 'ARGUMENT', note: '', sources: [] }
+    const mk = (id: number, speaker: number) => ({ id, speaker, speaker_name: `Participant ${speaker}`, text: `Texte ${id}`, timestamp: '2026-11-05T10:00:00+00:00', check })
+    hooks.useRoom.mockReturnValue(roomState({ role: 'spectator', you: null, messages: [mk(1, 1), mk(2, 2)] }))
+    render(<RoomPage id="room-1" />)
+    expect(screen.queryByRole('button', { name: /Répondre au message/ })).not.toBeInTheDocument()
   })
 
   it('affiche le retour du signalement', () => {

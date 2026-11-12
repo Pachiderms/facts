@@ -173,9 +173,9 @@ describe('TrustMeter', () => {
 })
 
 describe('Composer', () => {
-  let onSend: ReturnType<typeof vi.fn<(text: string) => boolean>>
+  let onSend: ReturnType<typeof vi.fn<(text: string, replyTo: number | null) => boolean>>
   beforeEach(() => {
-    onSend = vi.fn<(text: string) => boolean>().mockReturnValue(true)
+    onSend = vi.fn<(text: string, replyTo: number | null) => boolean>().mockReturnValue(true)
   })
   const type = async (text: string) => userEvent.type(screen.getByRole('textbox'), text)
 
@@ -188,7 +188,7 @@ describe('Composer', () => {
   it('Entrée envoie et vide le champ', async () => {
     render(<Composer role="A" status="open" onSend={onSend} />)
     await type('Mon argument{Enter}')
-    expect(onSend).toHaveBeenCalledWith('Mon argument')
+    expect(onSend).toHaveBeenCalledWith('Mon argument', null)
     expect(screen.getByRole('textbox')).toHaveValue('')
   })
 

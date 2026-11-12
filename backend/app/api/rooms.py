@@ -70,6 +70,8 @@ class MessageEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     type: Literal["message"]
     text: str = Field(max_length=2000)
+    # Identifiant du message auquel on répond (le serveur vérifie qu'il existe et reprend lui-même son texte).
+    reply_to: Annotated[int, Field(strict=True, ge=1, le=10_000_000)] | None = None
 
 
 class ReportEvent(BaseModel):
@@ -485,7 +487,7 @@ async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings
                 elif isinstance(event, TakeSeatEvent):
                     await room.take_seat(client)
                 else:
-                    await room.post_message(client, event.text)
+                    await room.post_message(client, event.text, event.reply_to)
                     if room.is_banned(client):  # 3e message illégal : la connexion est fermée
                         await ws.close(code=WS_POLICY_VIOLATION)
                         return
