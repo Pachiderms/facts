@@ -143,3 +143,8 @@ def test_render_blueprint_asks_for_the_database_url_without_a_value():
 def test_render_service_is_pinned_to_frankfurt():
     # Sans « region », Render crée le service à Oregon, et la région ne peut plus être modifiée ensuite.
     assert "    region: frankfurt\n" in RENDER
+
+
+def test_render_service_name_differs_from_the_original_oregon_service():
+    # Render refuse un nom déjà pris dans l'espace de travail, même pour un service suspendu.
+    assert "    name: facts-api-eu\n" in RENDER
