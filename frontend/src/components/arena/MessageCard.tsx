@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, Flag, RefreshCw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleHelp, CornerUpLeft, ExternalLink, Flag, RefreshCw, XCircle } from 'lucide-react'
 import type { RoomMessage } from '../../api/types'
 import { badgeTone, formatTime, safeHref } from '../../lib/presentation'
 
@@ -26,6 +26,9 @@ export function MessageCard({
   absent = false,
   viewerIsSpectator = false,
   onReport,
+  onReply,
+  onJumpTo,
+  highlighted = false,
 }: {
   message: RoomMessage
   delta?: number
@@ -38,6 +41,12 @@ export function MessageCard({
   viewerIsSpectator?: boolean
   /** Fourni uniquement pour les messages des autres : permet de les signaler. */
   onReport?: (messageId: number) => void
+  /** Fourni aux intervenants : permet de répondre à ce message. */
+  onReply?: (messageId: number) => void
+  /** Ramène au message cité. */
+  onJumpTo?: (messageId: number) => void
+  /** Mise en évidence temporaire après un saut depuis une citation. */
+  highlighted?: boolean
 }) {
   // Débat à deux : les messages se répondent de part et d'autre. Moi à droite ; un spectateur voit les impairs à gauche.
   const onLeft = viewerIsSpectator ? message.speaker % 2 === 1 : !mine
@@ -45,7 +54,10 @@ export function MessageCard({
   const pending = message.check.status === 'pending'
 
   return (
-    <li className={`space-y-2.5 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ${!alternate ? '' : onLeft ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}>
+    <li
+      id={`message-${message.id}`}
+      className={`space-y-2.5 rounded-xl border bg-white p-4 shadow-sm transition-colors ${highlighted ? 'border-neutral-900 ring-2 ring-neutral-900/20' : 'border-neutral-200'} ${!alternate ? '' : onLeft ? 'mr-6 ml-0' : 'ml-6 mr-0'}`}
+    >
       <div className="flex items-center justify-between border-b border-neutral-100 pb-2 text-xs">
         <div className="flex items-center space-x-2">
           <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-200 text-[10px] font-bold text-neutral-800">
@@ -60,22 +72,49 @@ export function MessageCard({
         </time>
       </div>
 
+      {message.reply_to && !message.removed && (
+        <button
+          type="button"
+          onClick={() => onJumpTo?.(message.reply_to!.id)}
+          aria-label={`Réponse au message du Participant ${message.reply_to.speaker} : ${message.reply_to.preview}`}
+          className="flex w-full items-start gap-2 rounded-lg border-l-4 border-neutral-300 bg-neutral-50 px-3 py-2 text-left text-[11px] leading-snug text-neutral-600 hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+        >
+          <CornerUpLeft className="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" aria-hidden="true" />
+          <span className="min-w-0">
+            <span className="block font-bold text-neutral-700">Participant {message.reply_to.speaker}</span>
+            <span className="block break-words">{message.reply_to.preview}</span>
+          </span>
+        </button>
+      )}
+
       {message.removed ? (
         <p className="text-sm italic leading-relaxed text-neutral-500">{message.text}</p>
       ) : (
         <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-800">{message.text}</p>
       )}
 
-      {!message.removed && onReport && (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => onReport(message.id)}
-            aria-label={`Signaler le message de ${message.speaker_name}`}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
-          >
-            <Flag className="h-3 w-3" aria-hidden="true" /> Signaler
-          </button>
+      {!message.removed && (onReply || onReport) && (
+        <div className="flex justify-end gap-1">
+          {onReply && (
+            <button
+              type="button"
+              onClick={() => onReply(message.id)}
+              aria-label={`Répondre au message de ${message.speaker_name}`}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+            >
+              <CornerUpLeft className="h-3 w-3" aria-hidden="true" /> Répondre
+            </button>
+          )}
+          {onReport && (
+            <button
+              type="button"
+              onClick={() => onReport(message.id)}
+              aria-label={`Signaler le message de ${message.speaker_name}`}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+            >
+              <Flag className="h-3 w-3" aria-hidden="true" /> Signaler
+            </button>
+          )}
         </div>
       )}
 

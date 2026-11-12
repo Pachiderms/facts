@@ -170,6 +170,22 @@ describe('bouton de dictée', () => {
   })
 })
 
+describe('dictée et réponse combinées', () => {
+  it('un message dicté en réponse garde le message cité, et rien ne part avant le clic', async () => {
+    localStorage.setItem('facts.voice-consent', '1')
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ text: 'Je réponds oralement.', duration_seconds: 4 }))
+    const onSend = vi.fn(() => true)
+    const user = userEvent.setup()
+    render(<Composer role="A" status="open" onSend={onSend} voiceEnabled replyTo={{ id: 7, speaker: 2, preview: 'Cité' }} />)
+    await user.click(screen.getByRole('button', { name: /dicter/i }))
+    await user.click(await screen.findByRole('button', { name: /terminer/i }))
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('Je réponds oralement.'))
+    expect(onSend).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /^envoyer$/i }))
+    expect(onSend).toHaveBeenCalledWith('Je réponds oralement.', 7)
+  })
+})
+
 describe('client vocal', () => {
   it('pickMimeType choisit le premier format pris en charge', () => {
     expect(pickMimeType()).toBe('audio/webm;codecs=opus')

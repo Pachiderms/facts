@@ -1,8 +1,8 @@
 import { ArrowLeft, Lock, UserX, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { SocketStatus } from '../../api/socket'
 import { isSeat, type RoomSummary } from '../../api/types'
-import { formatDuration } from '../../lib/presentation'
+import { formatDuration, quotePreview } from '../../lib/presentation'
 import { useRoom } from '../../hooks/useRoom'
 import { useVoiceAvailable } from '../../hooks/useVoiceAvailable'
 import { recordVisit, removeEntry } from '../../lib/history'
@@ -44,6 +44,20 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
   } = useRoom(roomId, code, spectate)
   const voiceEnabled = useVoiceAvailable()
   const info = room ?? fallback
+  const [replyId, setReplyId] = useState<number | null>(null)
+  const [highlightId, setHighlightId] = useState<number | null>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // La cible disparaît d'elle-même si le message est retiré (ou sorti de l'historique) pendant la saisie.
+  const replyTarget = replyId === null ? null : (messages.find((m) => m.id === replyId && !m.removed) ?? null)
+  const jumpTo = (id: number) => {
+    const el = document.getElementById(`message-${id}`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setHighlightId(id)
+    clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlightId(null), 1800)
+  }
+  useEffect(() => () => clearTimeout(highlightTimer.current), [])
   const listRef = useRef<HTMLUListElement>(null)
   const stickToBottom = useRef(true)
 
@@ -304,12 +318,23 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
               viewerIsSpectator={role === 'spectator'}
               absent={presence !== null && !presence.present.includes(m.speaker)}
               onReport={you === null || m.speaker !== you ? report : undefined}
+              onReply={isSeat(role) ? setReplyId : undefined}
+              onJumpTo={jumpTo}
+              highlighted={highlightId === m.id}
             />
           ))
         )}
       </ul>
 
-      <Composer role={role} number={you} status={status} onSend={send} voiceEnabled={voiceEnabled} />
+      <Composer
+        role={role}
+        number={you}
+        status={status}
+        onSend={send}
+        replyTo={replyTarget && { id: replyTarget.id, speaker: replyTarget.speaker, preview: quotePreview(replyTarget.text) }}
+        onCancelReply={() => setReplyId(null)}
+        voiceEnabled={voiceEnabled}
+      />
     </div>
   )
 }

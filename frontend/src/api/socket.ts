@@ -104,9 +104,10 @@ export class RoomSocket {
   }
 
   /** Envoie un message ; retourne `false` si la connexion n'est pas ouverte. */
-  send(text: string): boolean {
+  send(text: string, replyTo: number | null = null): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) return false
-    this.ws.send(JSON.stringify({ type: 'message', text }))
+    const payload = replyTo === null ? { type: 'message', text } : { type: 'message', text, reply_to: replyTo }
+    this.ws.send(JSON.stringify(payload))
     return true
   }
 
