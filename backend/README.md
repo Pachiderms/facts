@@ -217,3 +217,14 @@ La règle gratuite (`is_checkable` : chiffres, « selon », « étude »…) rat
 - Plafonds : 1 Mo par envoi (lu en flux, même sans `Content-Length`), 6 requêtes/min par IP, **20 messages vocaux par personne et par jour**, 60 par IP et par jour, et un **budget global de 20 000 s d'audio par jour** (Groq offre ~28 800 s) au-delà duquel la voix se ferme pour tous (503) sans bloquer le compte Groq. Chaque requête compte 10 s minimum, comme chez Groq.
 - Durée réelle lue dans la réponse du fournisseur : > 33 s refusé. Segments de silence et phrases fantômes de Whisper (« Sous-titres réalisés par… ») écartés ; transcription nettoyée et plafonnée à 2 000 caractères.
 - Réglages : `FACTS_STT_ENABLED`, `FACTS_STT_API_KEY` (vide = réutilise `FACTS_LLM_API_KEY`), `FACTS_STT_MODEL`, `FACTS_STT_DAILY_PER_PERSON`, `FACTS_STT_GLOBAL_DAILY_SECONDS`… Sans clé, la voix est simplement désactivée.
+
+### Base de données PostgreSQL (PR H)
+
+Fondation pour les comptes, l'historique et les quotas des PR suivantes. **Rien ne change tant que `FACTS_DATABASE_URL` est vide** : les salons restent en mémoire.
+
+- `app/db/url.py` : accepte l'adresse telle que la donne Neon (`postgresql://…?sslmode=require&channel_binding=require`) et la traduit pour asyncpg ; chiffrement TLS avec vérification du certificat dès que la base n'est pas locale ; compatible PgBouncer (adresse « pooled » de Neon : pas de requêtes préparées nommées) ; délais de connexion et de requête bornés.
+- `app/db/engine.py` : petit pool (3 + 2), `pool_pre_ping` et `pool_recycle=240` car Neon coupe les connexions après 5 min d'inactivité ; une session = une transaction (annulée sur exception).
+- **Secret** : `database_url` est un `SecretStr` ; l'adresse n'apparaît ni dans un `repr`, ni dans un message d'erreur, ni dans `/health/db`.
+- **Migrations Alembic** (`migrations/`, adresse lue dans l'environnement, jamais dans `alembic.ini`) : `alembic upgrade head`. L'image Docker les applique au démarrage (`start.sh`) avant d'accepter du trafic ; une migration qui échoue arrête le démarrage. Créer une migration : `alembic revision -m "…"` (pas d'autogénération aveugle : relire le fichier). Un test compare le schéma des migrations à `app/db/schema.py` et échoue en cas de dérive.
+- **`/health` ne touche jamais la base** : le pinger l'appelle toutes les 10 min et empêcherait Neon de se mettre en veille (100 h de calcul gratuites par mois). `/health/db` teste la base (`ok` / `down` / `disabled`) ; à n'appeler qu'à la main, limité comme les lectures.
+- Tests : `tests/test_db_url.py` (sans base), `test_health_db_probe.py`, `test_start_script.py`, et `test_db_integration.py` sur un **vrai PostgreSQL** (ignorés sans `FACTS_TEST_DATABASE_URL` ; la CI démarre un service PostgreSQL 16 et refuse de les ignorer). En local : `FACTS_TEST_DATABASE_URL=postgresql://user@localhost/facts_test python -m pytest`.

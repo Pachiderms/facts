@@ -13,6 +13,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini start.sh ./
 
 # Utilisateur sans privilèges (le code n'a besoin d'écrire nulle part : tout vit en mémoire).
 RUN useradd --system --no-create-home --uid 10001 facts
@@ -21,5 +23,6 @@ USER facts
 ENV FACTS_ENV=prod
 EXPOSE 8000
 
-# Render fournit $PORT ; 8000 par défaut en local. Un seul worker : l'état des salons est en mémoire.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --no-server-header"]
+# start.sh : migrations Alembic si une base est configurée, puis uvicorn (Render fournit $PORT ; 8000 par défaut).
+# Un seul worker : l'état des salons est en mémoire.
+CMD ["./start.sh"]

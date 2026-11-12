@@ -18,6 +18,20 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: facts
+          POSTGRES_PASSWORD: facts-ci
+          POSTGRES_DB: facts_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U facts" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Les tests d'intégration PostgreSQL ne peuvent pas être ignorés en CI (test_db_required.py).
+      FACTS_TEST_DATABASE_URL: postgresql://facts:facts-ci@localhost:5432/facts_test
+      FACTS_REQUIRE_DB_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -41,5 +55,7 @@ jobs:
             -e FACTS_CORS_ORIGINS=https://facts.pages.dev facts-api
           for i in $(seq 1 20); do curl -sf localhost:8000/health && exit 0; sleep 1; done
           docker logs api; exit 1
+      - name: Le script de démarrage est exécutable et les migrations sont dans l'image
+        run: docker exec api sh -c 'test -x /srv/start.sh && test -f /srv/migrations/versions/0001_app_meta.py'
       - name: Le processus ne tourne pas en root
         run: test "$(docker exec api id -u)" != "0"
