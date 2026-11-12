@@ -38,12 +38,23 @@ Dans Render, définir `FACTS_CORS_ORIGINS` = l'adresse **exacte** du site (sans 
 - Une vérification d'affirmation renvoie un verdict.
 - Deux onglets dans un même salon : les messages arrivent en direct.
 
+## Déplacer l'API vers une autre région (ex. Oregon → Francfort)
+
+Render ne change pas la région d'un service existant (`render.yaml` fixe `region: frankfurt` à la création). Pour déménager :
+
+1. Dans Render : **New → Blueprint**, choisir ce dépôt : le nouveau service est créé à Francfort. Saisir les variables « à renseigner » (clés Groq/Tavily, `FACTS_CORS_ORIGINS`, éventuellement `FACTS_DATABASE_URL`).
+2. Noter la nouvelle adresse de l'API, la mettre dans `VITE_API_URL` (variables du build Cloudflare) **et relancer un build** du site.
+3. Vérifier `/health` et un salon, mettre à jour le pinger (UptimeRobot ou `FACTS_API_URL` GitHub) avec la nouvelle adresse.
+4. Seulement ensuite : suspendre puis supprimer l'ancien service (sinon il consomme des heures gratuites en doublon).
+
+Rien n'est perdu : les salons sont en mémoire et repartent de zéro à chaque déploiement.
+
 ## Base de données Neon (optionnelle, gratuite)
 
 Inutile tant que rien n'est stocké en base (les salons restent en mémoire). À faire avant les comptes utilisateurs.
 
 1. Créer un compte sur **neon.com**, puis un projet (région la plus proche de Render, par ex. Francfort). Offre gratuite : 1 Go par projet, 100 h de calcul par mois, mise en veille après 5 minutes d'inactivité (premier appel plus lent de 1 à 3 s).
-2. Dans **Connect**, choisir la base et copier l'adresse **« Pooled connection »** (hôte contenant `-pooler`).
+2. Dans la console Neon (console.neon.tech), ouvrir le projet puis cliquer sur **Connect** dans la barre de navigation. Laisser Branch/Compute/Database/Role par défaut, vérifier que l'interrupteur **Connection pooling** est activé, puis copier l'adresse (le nom du serveur contient `-pooler`). Région conseillée : la même que Render (Francfort).
 3. Dans Render : variable `FACTS_DATABASE_URL` = cette adresse, puis redéployer. Les migrations s'appliquent automatiquement au démarrage ; le journal affiche `Running upgrade  -> 0001`.
 4. Vérifier à la main : `https://<votre-api>.onrender.com/health/db` → `{"db":"ok"}`.
 

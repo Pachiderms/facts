@@ -4,6 +4,9 @@ services:
     name: facts-api
     runtime: docker
     plan: free
+    # Région : Francfort (proche des utilisateurs et de la base Neon eu-central-1). Sans cette ligne, Render choisit Oregon.
+    # Ne peut pas être modifiée après la création du service : pour changer, créer un nouveau service.
+    region: frankfurt
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /health
