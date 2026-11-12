@@ -34,8 +34,9 @@ class Recording:
     def __init__(self):
         self.calls = []
 
-    async def check(self, text):
+    async def check(self, text, context=None):
         self.calls.append(text)
+        self.contexts = getattr(self, "contexts", []) + [context]
         return MessageCheck(status="verified", badge_type="green", badge_text="VÉRIFIÉ")
 
 
@@ -74,7 +75,30 @@ async def test_excerpt_match_ignores_case_and_whitespace():
 async def test_reformulated_or_invented_claim_is_discarded():
     for invented in ("L'ISF a été supprimé par Macron en 2017.", "Le gouvernement a créé un impôt."):
         result = await ClaimExtractor(ScriptedLLM({"claim": invented})).triage(FACT)
-        assert (result.outcome, result.claim) == ("no_claim", None)  # personne n'est jugé sur une phrase qu'il n'a pas écrite
+        # personne n'est jugé sur une phrase qu'il n'a pas écrite, mais ce n'est pas « aucun fait » : réponse inexploitable
+        assert (result.outcome, result.claim) == ("unavailable", None)
+
+
+@pytest.mark.parametrize(
+    "message,copied",
+    [
+        ("Cela pourrait entraîner une baisse de 50% des recettes de l'État.", "baisse de 50 % des recettes de l'État"),  # espace avant %
+        ("Cela pourrait entraîner une baisse de 50 % des recettes de l'État.", "baisse de 50% des recettes de l'Etat"),  # accent
+        ("Le gouvernement a supprimé l\u2019ISF en 2017, c\u2019est un fait.", "supprimé l'ISF en 2017"),  # apostrophe typographique
+        ("Le gouvernement a supprimé\u00a0l'ISF en 2017, c'est un fait.", "supprimé l'ISF en 2017"),  # espace insécable
+    ],
+)
+async def test_excerpt_check_tolerates_typography_but_not_other_words(message, copied):
+    result = await ClaimExtractor(ScriptedLLM({"claim": copied})).triage(message)
+    assert (result.outcome, result.claim) == ("claim", copied)
+
+
+async def test_prompt_treats_hedged_figures_as_verifiable():
+    llm = ScriptedLLM({"claim": None})
+    await ClaimExtractor(llm).triage("Cela pourrait entraîner une baisse de 50 % des recettes de l'État.")
+    system = llm.calls[0][0]
+    assert "conditionnel" in system and "50 %" in system  # règle 8
+    assert "SAUF si le message avance un chiffre" in system  # le doute ne l'emporte pas sur un chiffre
 
 
 @pytest.mark.parametrize("answer", [{"claim": None}, {"claim": ""}, {"claim": "   "}, {}])
@@ -226,3 +250,38 @@ async def test_triaged_claims_are_verified_literally_from_the_message():
             inner.calls.clear()
             await checker.check(case.text)
             assert inner.calls == [case.fact]
+
+
+# ---------- conditionnel chiffré (régression : « Cela pourrait entraîner une baisse de 50 % ») ----------
+HEDGED = "Cela pourrait entraîner une baisse de 50% des recettes de l'État."
+CONTEXT = "L'augmentation du SMIC pourrait vider les caisses de l'Etat."
+
+
+async def test_hedged_figure_is_verified_even_if_the_triage_says_no_claim():
+    checker, inner, _ = make_checker({"claim": None})
+    await checker.check(HEDGED, context=CONTEXT)
+    assert inner.calls == [HEDGED] and inner.contexts == [CONTEXT]  # vérifié en entier, avec le message cité comme contexte
+
+
+async def test_hedged_figure_is_verified_when_the_triage_answer_is_unusable():
+    checker, inner, _ = make_checker({"claim": "texte que personne n'a écrit"})
+    await checker.check(HEDGED, context=CONTEXT)
+    assert inner.calls == [HEDGED]
+
+
+async def test_vague_prediction_without_figure_stays_an_argument():
+    checker, inner, _ = make_checker({"claim": None})
+    result = await checker.check("Cette réforme va ruiner le pays dans les années à venir.")
+    assert result.status == "no_claim" and not inner.calls
+
+
+async def test_opinion_with_a_figure_is_still_not_verified():
+    checker, inner, _ = make_checker({"claim": None})
+    result = await checker.check("Je trouve que 35 heures, c'est trop peu, mais ce n'est que mon avis.")
+    assert result.status == "no_claim" and not inner.calls
+
+
+async def test_unusable_answer_on_a_figureless_message_is_not_evaluated_not_penalised():
+    checker, inner, _ = make_checker({"claim": "phrase inventée"})
+    result = await checker.check("Le gouvernement a supprimé l'impôt sur la fortune sans contrepartie.")
+    assert result.status == "unchecked" and not inner.calls

@@ -130,7 +130,7 @@ async def test_triage_receives_the_quote_as_context_and_ignores_a_claim_copied_f
     llm = ScriptedLLM({"claim": ORIGINAL})  # le LLM recopie le contexte au lieu du message
     result = await ClaimExtractor(llm).triage("Non, c'est faux, ils ont limité les contacts, voyons.", context=ORIGINAL)
     assert "<CONTEXT_MESSAGE>\n" + ORIGINAL in llm.calls[0][1]
-    assert result.outcome == "no_claim"  # l'extrait doit venir du message, jamais du contexte
+    assert (result.outcome, result.claim) == ("unavailable", None)  # jamais l'extrait du contexte, et jamais « aucun fait »
 
 
 async def test_triage_claim_is_checked_with_the_context():

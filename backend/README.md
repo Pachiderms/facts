@@ -196,6 +196,8 @@ La règle gratuite (`is_checkable` : chiffres, « selon », « étude »…) rat
 - Sont triés : tout message d'au moins 40 caractères et tout message que la règle retient, **sauf les questions** (règle seule, comme avant).
 - **L'extrait doit être littéral** : une phrase reformulée ou inventée par le LLM est écartée (personne n'est noté sur ce qu'il n'a pas écrit). Un message qui ressemble à une injection n'est jamais envoyé au LLM.
 - Panne, délai ou JSON invalide : la règle sert de filet (message retenu = vérifié en entier ; sinon « non évalué »), **jamais de pénalité sur une panne**.
+- **Conditionnel chiffré** (« Cela pourrait entraîner une baisse de 50 % des recettes ») : c'est une estimation qu'on peut confronter à des études, donc vérifiable. Le prompt le dit (règle 8) et un filet déterministe ne laisse pas le tri écarter un message qui avance un chiffre, sauf formule d'opinion (« je trouve que… »). Une prédiction vague sans chiffre reste un argument.
+- **Extrait recopié avec une variante typographique** (« 50 % » / « 50% », « État » / « Etat », apostrophe courbe, espace insécable) : accepté. Un extrait vraiment absent du message n'est plus classé « aucun fait » mais « non évalué » (repli sur la règle, jamais de pénalité).
 - Coût : un appel LLM de plus par message concerné. `FACTS_CLAIM_TRIAGE=false` revient à la règle seule.
 - Jeu annoté : `tests/data/claim_cases.py` (58 messages). Les tests valident le câblage avec un faux LLM « oracle » ; la qualité du vrai modèle se mesure avec `python -m scripts.eval_triage` (clé requise, ~58 requêtes).
 
