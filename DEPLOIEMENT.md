@@ -38,6 +38,17 @@ Dans Render, définir `FACTS_CORS_ORIGINS` = l'adresse **exacte** du site (sans 
 - Une vérification d'affirmation renvoie un verdict.
 - Deux onglets dans un même salon : les messages arrivent en direct.
 
+## Base de données Neon (optionnelle, gratuite)
+
+Inutile tant que rien n'est stocké en base (les salons restent en mémoire). À faire avant les comptes utilisateurs.
+
+1. Créer un compte sur **neon.com**, puis un projet (région la plus proche de Render, par ex. Francfort). Offre gratuite : 1 Go par projet, 100 h de calcul par mois, mise en veille après 5 minutes d'inactivité (premier appel plus lent de 1 à 3 s).
+2. Dans **Connect**, choisir la base et copier l'adresse **« Pooled connection »** (hôte contenant `-pooler`).
+3. Dans Render : variable `FACTS_DATABASE_URL` = cette adresse, puis redéployer. Les migrations s'appliquent automatiquement au démarrage ; le journal affiche `Running upgrade  -> 0001`.
+4. Vérifier à la main : `https://<votre-api>.onrender.com/health/db` → `{"db":"ok"}`.
+
+**Ne pas donner `/health/db` au pinger** : chaque appel réveille la base et consomme des heures de calcul. `/health` (pinger) ne la touche pas. Pour couper la base : vider `FACTS_DATABASE_URL` et redéployer.
+
 ## Garder l'API éveillée (optionnel, gratuit)
 
 Render met l'API en veille après 15 minutes sans trafic. Un pinger externe l'évite :

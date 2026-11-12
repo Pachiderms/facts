@@ -11,6 +11,7 @@ from app.main import create_app
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = (ROOT / "backend" / "Dockerfile").read_text(encoding="utf-8")
 DOCKERIGNORE = (ROOT / "backend" / ".dockerignore").read_text(encoding="utf-8").splitlines()
+START = (ROOT / "backend" / "start.sh").read_text(encoding="utf-8")
 RENDER = (ROOT / "render.yaml").read_text(encoding="utf-8")
 FRONT = "https://facts.pages.dev"
 
@@ -19,8 +20,9 @@ def test_image_runs_as_unprivileged_user_in_prod_mode_with_a_single_worker():
     assert "USER facts" in DOCKERFILE
     assert DOCKERFILE.index("USER facts") < DOCKERFILE.index("CMD")  # le serveur ne tourne jamais en root
     assert "FACTS_ENV=prod" in DOCKERFILE
-    assert "--workers 1" in DOCKERFILE  # l'état des salons est en mémoire : un seul processus
-    assert "${PORT:-8000}" in DOCKERFILE  # Render impose son port
+    assert "--workers 1" in START  # l'état des salons est en mémoire : un seul processus
+    assert "${PORT:-8000}" in START  # Render impose son port
+    assert '"./start.sh"' in DOCKERFILE
 
 
 def test_image_never_contains_secrets_or_dev_files():
@@ -118,3 +120,21 @@ def test_keepalive_only_calls_health_with_a_timeout_and_runs_within_render_budge
     assert minute == "*/10"
     start, end = (int(h) for h in hours.split("-"))
     assert (end - start + 1) * 31 < 700  # reste sous les 750 h gratuites/mois, avec marge
+
+
+def test_start_script_migrates_only_when_a_database_is_configured_and_fails_fast():
+    assert "set -e" in START  # une migration qui échoue interrompt le démarrage
+    assert 'if [ -n "${FACTS_DATABASE_URL:-}" ]' in START
+    assert START.index("alembic upgrade head") < START.index("exec uvicorn")  # migrations AVANT le trafic
+    assert "exec uvicorn" in START  # uvicorn reçoit les signaux d'arrêt de Render
+
+
+def test_image_ships_migrations_but_no_database_secret():
+    assert "COPY migrations" in DOCKERFILE and "alembic.ini" in DOCKERFILE
+    assert "DATABASE_URL" not in DOCKERFILE
+    assert "postgresql" not in (ROOT / "backend" / "alembic.ini").read_text(encoding="utf-8")  # aucune adresse versionnée
+
+
+def test_render_blueprint_asks_for_the_database_url_without_a_value():
+    block = RENDER.split("FACTS_DATABASE_URL", 1)[1].split("- key:", 1)[0]
+    assert "sync: false" in block and "value:" not in block  # secret saisi dans le tableau de bord

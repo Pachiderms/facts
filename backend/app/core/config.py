@@ -5,6 +5,7 @@ Aucun secret n'est codé en dur : la clé LLM vient de FACTS_LLM_API_KEY.
 
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +17,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     # Ne faire confiance à X-Forwarded-For que derrière un proxy maîtrisé.
     trust_proxy_headers: bool = False
+
+    # Base de données PostgreSQL (Neon, Supabase…). Vide = tout reste en mémoire, comme avant. SecretStr : jamais
+    # affichée dans un journal, un repr ou une trace (l'adresse contient le mot de passe).
+    database_url: SecretStr = SecretStr("")
+    db_pool_size: int = 3
+    db_max_overflow: int = 2
 
     # Limites d'entrée
     assertion_min_chars: int = 10

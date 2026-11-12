@@ -17,6 +17,9 @@ services:
       # Adresse EXACTE du front (https://xxx.pages.dev), sans slash final. Sert à CORS et aux WebSockets.
       - key: FACTS_CORS_ORIGINS
         sync: false
+      # Adresse PostgreSQL (Neon : variante « pooled »). Optionnelle : vide = salons en mémoire uniquement.
+      - key: FACTS_DATABASE_URL
+        sync: false
       - key: FACTS_LLM_API_KEY
         sync: false
       - key: FACTS_TAVILY_API_KEY

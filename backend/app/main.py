@@ -1,11 +1,13 @@
 """Point d'entrée : `uvicorn app.main:app`. La fabrique `create_app` sert aussi aux tests."""
 
+import asyncio
+import logging
 import time
 from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -13,9 +15,11 @@ from app.adapters.llm import OpenAICompatibleLLM
 from app.adapters.stt import GroqWhisper, SpeechToText
 from app.adapters.search_chain import FallbackSearch, build_search_chain
 from app.api import check as check_api
+from app.api.deps import enforce_read_rate_limit
 from app.api import rooms as rooms_api
 from app.api import voice as voice_api
 from app.core.cache import TTLCache
+from app.db.engine import Database
 from app.core.config import Settings, get_settings
 from app.core.security import DailyBudget, SlidingWindowRateLimiter
 from app.services.factcheck import FactCheckService
@@ -77,6 +81,7 @@ def create_app(
     rooms: RoomRegistry | None = None,
     reformulator: ThemeReformulator | None = None,
     stt: SpeechToText | None = None,
+    db: Database | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -89,6 +94,13 @@ def create_app(
                 app.state.reformulator = build_reformulator(settings, llm)
         if app.state.rooms is None:
             app.state.rooms = build_rooms(settings, app.state.service, build_moderator(settings, llm), llm)
+        db_owned = None
+        if app.state.db is None and settings.database_url.get_secret_value():
+            app.state.db = db_owned = Database(
+                settings.database_url.get_secret_value(),
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+            )
         stt_owned = None
         if app.state.stt is None and settings.voice_available:
             app.state.stt = stt_owned = GroqWhisper(
@@ -97,6 +109,8 @@ def create_app(
         yield
         if stt_owned is not None:
             await stt_owned.aclose()
+        if db_owned is not None:
+            await db_owned.aclose()
         await app.state.rooms.aclose()  # annule les vérifications en cours
         if llm is not None:
             await llm.aclose()
@@ -130,6 +144,7 @@ def create_app(
     app.state.report_review_limiter = SlidingWindowRateLimiter(settings.daily_report_review_limit, 86_400)
     app.state.daily_reformulation_limiter = SlidingWindowRateLimiter(settings.daily_reformulation_limit, 86_400)
     app.state.stt = stt
+    app.state.db = db
     app.state.stt_minute_limiter = SlidingWindowRateLimiter(settings.stt_per_minute, 60)
     app.state.stt_person_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_person, 86_400)
     app.state.stt_ip_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_ip, 86_400)
@@ -163,6 +178,19 @@ def create_app(
     async def health() -> dict[str, str | int]:
         # Durée depuis le démarrage : une valeur qui retombe à ~0 trahit un redémarrage (et donc des salons perdus).
         return {"status": "ok", "uptime_seconds": int(time.monotonic() - app.state.started)}
+
+    @app.get("/health/db", include_in_schema=False, dependencies=[Depends(enforce_read_rate_limit)])
+    async def health_db() -> JSONResponse:
+        """Sonde de la base. À NE PAS donner au pinger : chaque appel réveille la base (Neon : heures de calcul)."""
+        database = app.state.db
+        if database is None:
+            return JSONResponse({"db": "disabled"})
+        try:
+            await asyncio.wait_for(database.ping(), 10)
+        except Exception:  # noqa: BLE001 - le détail (hôte, mot de passe) ne doit jamais sortir
+            logging.getLogger("facts.db").warning("base de données injoignable")
+            return JSONResponse({"db": "down"}, status_code=503)
+        return JSONResponse({"db": "ok"})
 
     app.include_router(check_api.router)
     app.include_router(rooms_api.router)
