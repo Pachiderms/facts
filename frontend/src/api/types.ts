@@ -96,6 +96,13 @@ export interface MessageCheck {
   sources: { title: string; url: string; domain: string }[]
 }
 
+/** Citation d'un message précédent. L'aperçu est fourni par le SERVEUR (jamais par l'auteur de la réponse). */
+export interface ReplyRef {
+  id: number
+  speaker: number
+  preview: string
+}
+
 export interface RoomMessage {
   id: number
   /** Numéro stable de l'auteur dans ce salon (« Participant N »), jamais réattribué. */
@@ -107,6 +114,8 @@ export interface RoomMessage {
   check: MessageCheck
   /** Retiré par la modération : le texte d'origine n'est plus fourni. */
   removed?: boolean
+  /** Message auquel celui-ci répond, s'il y en a un. */
+  reply_to?: ReplyRef | null
 }
 
 export interface Presence {

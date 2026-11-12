@@ -5,7 +5,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
-from app.core.security import InvalidInputError
+from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
 from app.core.text import fit_sentences
 from app.services.claim_triage import ClaimExtractor, is_triage_candidate
 from app.services.factcheck import FactCheckService
@@ -57,8 +57,31 @@ class MessageCheck(BaseModel):
         return cls(status="unchecked", badge_type="gray", badge_text=reason)
 
 
+PREVIEW_CHARS = 120
+CONTEXT_CHARS = 300
+
+
+def reply_preview(text: str, limit: int = PREVIEW_CHARS) -> str:
+    """Aperçu affiché dans une réponse : texte du message cité, espaces réduits, coupé proprement."""
+    flat = re.sub(r"\s+", " ", text).strip()
+    return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
+
+
+def reply_context(text: str, limit: int = CONTEXT_CHARS) -> str | None:
+    """Message cité transmis comme CONTEXTE à la vérification : nettoyé, borné, jamais s'il ressemble à une injection.
+
+    Ce texte vient d'un autre participant : c'est une donnée non fiable, qui ne sert qu'à comprendre les références
+    (« cela », « cette loi ») de la réponse. Il n'est ni vérifié, ni utilisé comme source.
+    """
+    try:
+        clean = sanitize_text(reply_preview(text, limit), limit)
+    except InvalidInputError:
+        return None
+    return None if looks_like_prompt_injection(clean) else clean
+
+
 class MessageChecker(Protocol):
-    async def check(self, text: str) -> MessageCheck: ...
+    async def check(self, text: str, context: str | None = None) -> MessageCheck: ...
 
 
 _VERDICT_MAP: dict[str, tuple[str, BadgeType, str]] = {
@@ -73,9 +96,12 @@ class FactCheckMessageChecker:
     def __init__(self, service: FactCheckService) -> None:
         self._service = service
 
-    async def check(self, text: str) -> MessageCheck:
+    async def check(self, text: str, context: str | None = None) -> MessageCheck:
         try:
-            response = await self._service.check(text, institutional_filter=True)
+            if context is None:
+                response = await self._service.check(text, institutional_filter=True)
+            else:
+                response = await self._service.check(text, institutional_filter=True, context=context)
         except InvalidInputError:
             # Inclut les tentatives d'injection : le message reste visible, mais n'est pas évalué.
             return MessageCheck.unchecked("NON ÉVALUÉ")
@@ -105,12 +131,15 @@ class TriagingMessageChecker:
         """Tout message long, et tout message court que la règle retient (« Selon moi… » compris) ; jamais une question."""
         return not text.strip().endswith("?") and (is_triage_candidate(text) or is_checkable(text))
 
-    async def check(self, text: str) -> MessageCheck:
+    async def check(self, text: str, context: str | None = None) -> MessageCheck:
         if not self._triaged(text):
-            return await self._inner.check(text)
-        result = await self._extractor.triage(text)
+            return await self._call(text, context)
+        result = await self._extractor.triage(text, context=context)
         if result.outcome == "claim" and result.claim:
-            return await self._inner.check(result.claim)
+            return await self._call(result.claim, context)
         if result.outcome == "unavailable":
-            return await self._inner.check(text) if is_checkable(text) else MessageCheck.unchecked("NON ÉVALUÉ")
+            return await self._call(text, context) if is_checkable(text) else MessageCheck.unchecked("NON ÉVALUÉ")
         return MessageCheck.no_claim()
+
+    async def _call(self, text: str, context: str | None) -> MessageCheck:
+        return await (self._inner.check(text) if context is None else self._inner.check(text, context=context))

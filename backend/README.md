@@ -198,3 +198,11 @@ La règle gratuite (`is_checkable` : chiffres, « selon », « étude »…) rat
 - Panne, délai ou JSON invalide : la règle sert de filet (message retenu = vérifié en entier ; sinon « non évalué »), **jamais de pénalité sur une panne**.
 - Coût : un appel LLM de plus par message concerné. `FACTS_CLAIM_TRIAGE=false` revient à la règle seule.
 - Jeu annoté : `tests/data/claim_cases.py` (58 messages). Les tests valident le câblage avec un faux LLM « oracle » ; la qualité du vrai modèle se mesure avec `python -m scripts.eval_triage` (clé requise, ~58 requêtes).
+
+### Répondre à un message (PR F)
+
+`{"type":"message","text":"…","reply_to":<id>}` : `reply_to` est un entier strict (optionnel). Le serveur **vérifie** que le message existe dans l'historique du salon et n'a pas été retiré, puis reprend **lui-même** le numéro de l'auteur et un aperçu (120 caractères) : le client ne peut pas faire dire n'importe quoi à quelqu'un. Un identifiant inconnu ou un message retiré est refusé (`invalid_message`) et rien n'est publié.
+
+- **Contexte de vérification** : le message cité (nettoyé, 300 caractères au plus, ignoré s'il ressemble à une injection) est transmis au tri et au vérificateur dans une balise `<CONTEXT>` / `<CONTEXT_MESSAGE>`. Il sert uniquement à comprendre « cela », « cette loi », « en 2017 » : il n'est ni vérifié, ni cité comme source, ni utilisé comme preuve, et le tri ne peut jamais en extraire un fragment (l'extrait doit venir du message). Le contexte fait partie de la clé de cache.
+- **Réponses elliptiques** (« C'est faux. ») : pas de reformulation par le LLM. Sans fait énoncé par l'auteur, elles restent non vérifiables.
+- Quand un message est retiré par la modération, l'aperçu des réponses existantes est remplacé par « [Message retiré par la modération] ».
