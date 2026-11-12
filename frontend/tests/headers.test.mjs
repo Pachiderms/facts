@@ -40,6 +40,11 @@ describe('buildHeaders', () => {
     expect(headers).toContain("style-src-attr 'unsafe-inline'")
   })
 
+  it('autorise le micro uniquement pour le site lui-même (saisie vocale), jamais la caméra', () => {
+    expect(headers).toMatch(/Permissions-Policy: [^\n]*microphone=\(self\)/)
+    expect(headers).toMatch(/Permissions-Policy: [^\n]*camera=\(\)/)
+  })
+
   it('ajoute les en-têtes de durcissement et le cache des assets', () => {
     for (const h of ['X-Content-Type-Options: nosniff', 'X-Frame-Options: DENY', 'Referrer-Policy:', 'Permissions-Policy:', 'Strict-Transport-Security:']) {
       expect(headers).toContain(h)

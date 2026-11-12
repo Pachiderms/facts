@@ -1,0 +1,33 @@
+# Garde l'API Render éveillée en appelant /health. DÉSACTIVÉ PAR DÉFAUT.
+#
+# Interrupteur : variable de dépôt KEEPALIVE_ENABLED (Settings > Secrets and variables > Actions > Variables).
+#   - "true"            -> le ping tourne
+#   - absente / autre   -> le workflow s'exécute en 2 secondes sans rien appeler (et ne consomme pas d'heures Render)
+# URL de l'API : variable de dépôt FACTS_API_URL (ex. https://facts-api.onrender.com), sans secret.
+name: keepalive
+
+on:
+  schedule:
+    # Toutes les 10 min, de 06:00 à 22:50 UTC (07h-23h50 en hiver, 08h-00h50 en été, heure de Paris).
+    # La nuit, l'API dort : cela limite la consommation à ~530 h sur les 750 h gratuites de Render.
+    - cron: "*/10 6-22 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    if: ${{ vars.KEEPALIVE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      API_URL: ${{ vars.FACTS_API_URL }}
+    steps:
+      - name: Appeler /health
+        run: |
+          case "$API_URL" in
+            https://*) ;;
+            *) echo "FACTS_API_URL absente ou invalide (https:// requis)"; exit 1 ;;
+          esac
+          # Un démarrage à froid peut durer ~1 min : délai large, 3 essais.
+          curl -fsS --max-time 60 --retry 2 --retry-delay 5 "${API_URL%/}/health"

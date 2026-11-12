@@ -10,12 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.adapters.llm import OpenAICompatibleLLM
+from app.adapters.stt import GroqWhisper, SpeechToText
 from app.adapters.search_chain import FallbackSearch, build_search_chain
 from app.api import check as check_api
 from app.api import rooms as rooms_api
+from app.api import voice as voice_api
 from app.core.cache import TTLCache
 from app.core.config import Settings, get_settings
-from app.core.security import SlidingWindowRateLimiter
+from app.core.security import DailyBudget, SlidingWindowRateLimiter
 from app.services.factcheck import FactCheckService
 from app.services.claim_triage import ClaimExtractor
 from app.services.message_checker import FactCheckMessageChecker, TriagingMessageChecker, is_candidate
@@ -74,6 +76,7 @@ def create_app(
     limiter: SlidingWindowRateLimiter | None = None,
     rooms: RoomRegistry | None = None,
     reformulator: ThemeReformulator | None = None,
+    stt: SpeechToText | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -86,7 +89,14 @@ def create_app(
                 app.state.reformulator = build_reformulator(settings, llm)
         if app.state.rooms is None:
             app.state.rooms = build_rooms(settings, app.state.service, build_moderator(settings, llm), llm)
+        stt_owned = None
+        if app.state.stt is None and settings.voice_available:
+            app.state.stt = stt_owned = GroqWhisper(
+                settings.stt_base_url, settings.stt_key, settings.stt_model, timeout_seconds=settings.stt_timeout_seconds
+            )
         yield
+        if stt_owned is not None:
+            await stt_owned.aclose()
         await app.state.rooms.aclose()  # annule les vérifications en cours
         if llm is not None:
             await llm.aclose()
@@ -119,20 +129,27 @@ def create_app(
     app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
     app.state.report_review_limiter = SlidingWindowRateLimiter(settings.daily_report_review_limit, 86_400)
     app.state.daily_reformulation_limiter = SlidingWindowRateLimiter(settings.daily_reformulation_limit, 86_400)
+    app.state.stt = stt
+    app.state.stt_minute_limiter = SlidingWindowRateLimiter(settings.stt_per_minute, 60)
+    app.state.stt_person_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_person, 86_400)
+    app.state.stt_ip_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_ip, 86_400)
+    app.state.stt_budget = DailyBudget(settings.stt_global_daily_seconds)
     app.state.code_limiter = SlidingWindowRateLimiter(settings.room_code_max_failures, settings.room_code_window_seconds)
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,  # liste blanche explicite, jamais "*"
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Participant-Token"],
         allow_credentials=False,
     )
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
         declared = request.headers.get("content-length", "")
-        if declared.isdigit() and int(declared) > settings.max_body_bytes:
+        # Seule la route audio accepte un corps volumineux ; elle le plafonne elle-même en le lisant.
+        limit = settings.stt_max_bytes if request.url.path == "/api/v1/transcribe" else settings.max_body_bytes
+        if declared.isdigit() and int(declared) > limit:
             response = JSONResponse({"detail": "Requête trop volumineuse."}, status_code=413)
         else:
             response = await call_next(request)
@@ -149,6 +166,7 @@ def create_app(
 
     app.include_router(check_api.router)
     app.include_router(rooms_api.router)
+    app.include_router(voice_api.router)
     return app
 
 

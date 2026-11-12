@@ -46,7 +46,14 @@ Render met l'API en veille après 15 minutes sans trafic. Un pinger externe l'é
 2. **Add New Monitor** → type *HTTP(s)* → URL `https://<votre-api>.onrender.com/health` → intervalle **5 minutes** (le plus court de l'offre gratuite ; le seuil de veille est de 15).
 3. Garder l'API comme **seul** service gratuit de votre espace Render : rester éveillée en continu consomme environ 744 h sur les 750 h offertes par mois (mois de 31 jours). À vérifier le premier mois dans le tableau de bord Render.
 
-À éviter : un cron GitHub Actions (exécutions souvent retardées, parfois au-delà de 15 minutes).
+### Variante GitHub Actions (déjà dans le dépôt, éteinte par défaut)
+
+Le workflow `.github/workflows/keepalive.yml` appelle `/health` toutes les 10 minutes, de 06h à 23h UTC seulement (~530 h/mois d'API éveillée au lieu de 744 h).
+
+- **Allumer** : dans GitHub, *Settings → Secrets and variables → Actions → Variables*, créer `FACTS_API_URL` (ex. `https://facts-api.onrender.com`) et `KEEPALIVE_ENABLED` = `true`.
+- **Éteindre (le plus simple)** : mettre `KEEPALIVE_ENABLED` à `false` ou supprimer la variable. Le workflow continue de s'afficher mais ne fait aucun appel, donc ne réveille pas l'API et ne consomme pas d'heures Render. On peut aussi désactiver le workflow dans l'onglet *Actions*.
+- **Test manuel** : onglet *Actions → keepalive → Run workflow*.
+- **Limites** : GitHub retarde parfois les exécutions planifiées (au-delà de 15 min, l'API peut s'endormir malgré tout) ; il désactive les workflows planifiés après 60 jours sans activité dans le dépôt ; gratuit tant que le dépôt est public. UptimeRobot (ci-dessus) est plus régulier : en utiliser un seul des deux.
 
 Cela ne protège pas des **redémarrages** décidés par Render ni des redéploiements : les salons en mémoire sont alors perdus.
 
@@ -66,7 +73,7 @@ Dans UptimeRobot, la page de détail du moniteur permet de relire les réponses 
 |---|---|---|---|
 | Site (Cloudflare) | Toujours actif, sans veille | Désactiver le toggle `workers.dev` (Domains & Routes) : l'adresse ne répond plus, le code reste intact | Réactiver le toggle |
 | API (Render) | Actif ; en veille après 15 min sans trafic, sauf pinger | **Suspend Service** (ne consomme plus d'heures) | **Resume** |
-| Pinger (UptimeRobot) | Appelle `/health` toutes les 5 min | Mettre le moniteur en pause | Reprendre |
+| Pinger (UptimeRobot ou GitHub Actions) | Appelle `/health` régulièrement | Moniteur en pause, ou `KEEPALIVE_ENABLED=false` | Reprendre, ou `KEEPALIVE_ENABLED=true` |
 
 - **Tout couper** : pinger en pause, puis API suspendue. Le site peut rester allumé (il affichera « Serveur injoignable ») ou être désactivé aussi.
 - **Mises à jour** : chaque fusion sur `main` reconstruit le site (Cloudflare) et redéploie l'API (Render), automatiquement. Le redéploiement de l'API redémarre le service : **les salons en mémoire sont perdus**, donc éviter de fusionner pendant un débat.

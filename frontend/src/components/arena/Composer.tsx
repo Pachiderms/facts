@@ -3,6 +3,7 @@ import { useId, useState, type FormEvent, type KeyboardEvent } from 'react'
 import type { SocketStatus } from '../../api/socket'
 import { MESSAGE_MAX, type Role } from '../../api/types'
 import { composeHint } from '../../lib/presentation'
+import { VoiceButton } from './VoiceButton'
 
 interface Props {
   role: Role | null
@@ -13,6 +14,8 @@ interface Props {
   /** Message auquel on répond (déjà prêt à afficher), ou null. */
   replyTo?: { id: number; speaker: number; preview: string } | null
   onCancelReply?: () => void
+  /** Affiche le bouton de dictée (navigateur compatible et serveur configuré). */
+  voiceEnabled?: boolean
 }
 
 const HINT_STYLES = {
@@ -21,7 +24,7 @@ const HINT_STYLES = {
   info: 'bg-neutral-100 text-neutral-700 border-neutral-200',
 } as const
 
-export function Composer({ role, number = null, status, onSend, replyTo = null, onCancelReply }: Props) {
+export function Composer({ role, number = null, status, onSend, replyTo = null, onCancelReply, voiceEnabled = false }: Props) {
   const [text, setText] = useState('')
   const [failed, setFailed] = useState(false)
   const fieldId = useId()
@@ -31,6 +34,10 @@ export function Composer({ role, number = null, status, onSend, replyTo = null, 
   const trimmed = text.trim()
   const canSend = isSpeaker && connected && trimmed.length > 0
   const hint = isSpeaker ? composeHint(text) : null
+
+  /** La transcription s'ajoute au texte déjà saisi et reste modifiable : rien n'est envoyé sans clic ou Entrée. */
+  const insertTranscript = (spoken: string) =>
+    setText((prev) => `${prev.trim() ? `${prev.trim()} ` : ''}${spoken}`.slice(0, MESSAGE_MAX))
 
   const send = (e?: FormEvent) => {
     e?.preventDefault()
@@ -114,6 +121,8 @@ export function Composer({ role, number = null, status, onSend, replyTo = null, 
               Message non envoyé : la connexion au salon est interrompue. Votre texte est conservé.
             </p>
           )}
+
+          {voiceEnabled && <VoiceButton disabled={!isSpeaker || !connected} onText={insertTranscript} />}
 
           <div className="flex items-center justify-between">
             <span className="font-mono text-[11px] text-neutral-400">

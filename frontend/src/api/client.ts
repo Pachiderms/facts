@@ -253,3 +253,34 @@ export async function deleteRoom(id: string, signal?: AbortSignal): Promise<void
 export function warmUp(): void {
   void fetch(`${apiBase()}/health`).catch(() => undefined)
 }
+
+/** Fonctions optionnelles du serveur. Toute erreur = fonction absente : l'interface se replie sur le texte. */
+export async function fetchFeatures(signal?: AbortSignal): Promise<{ voice: boolean }> {
+  try {
+    const response = await request('/api/v1/features', { signal }, 10_000)
+    const data: unknown = response.ok ? await response.json().catch(() => null) : null
+    return { voice: isRecord(data) && data.voice === true }
+  } catch {
+    return { voice: false }
+  }
+}
+
+const TRANSCRIBE_TIMEOUT_MS = 40_000
+
+/** Envoie l'enregistrement (audio brut) et renvoie le texte transcrit. L'audio n'est jamais conservé côté serveur. */
+export async function transcribeAudio(audio: Blob, signal?: AbortSignal): Promise<string> {
+  const response = await request(
+    '/api/v1/transcribe',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': audio.type || 'audio/webm', 'X-Participant-Token': getParticipantToken() },
+      body: audio,
+      signal,
+    },
+    TRANSCRIBE_TIMEOUT_MS,
+  )
+  if (!response.ok) throw await toApiError(response, 'Enregistrement invalide.')
+  const data: unknown = await response.json().catch(() => null)
+  if (!isRecord(data) || typeof data.text !== 'string' || !data.text.trim()) throw BAD_RESPONSE()
+  return data.text
+}

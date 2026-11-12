@@ -130,3 +130,32 @@ def get_client_ip(request: HTTPConnection, trust_proxy_headers: bool = False) ->
             if last:
                 return last
     return request.client.host if request.client else "unknown"
+
+
+class DailyBudget:
+    """Budget glissant sur 24 h (ex. secondes d'audio) partagé par tous les visiteurs.
+
+    Protège un quota fournisseur global : quand il est épuisé, la fonctionnalité se ferme pour tous
+    plutôt que de laisser le fournisseur bloquer le compte.
+    """
+
+    def __init__(self, limit: float, window_seconds: float = 86_400, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit = limit
+        self.window = window_seconds
+        self._clock = clock
+        self._entries: deque[tuple[float, float]] = deque()
+        self._total = 0.0
+
+    def _prune(self) -> None:
+        now = self._clock()
+        while self._entries and now - self._entries[0][0] >= self.window:
+            self._total -= self._entries.popleft()[1]
+
+    def remaining(self) -> float:
+        self._prune()
+        return max(0.0, self.limit - self._total)
+
+    def spend(self, amount: float) -> None:
+        self._prune()
+        self._entries.append((self._clock(), amount))
+        self._total += amount

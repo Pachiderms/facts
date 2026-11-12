@@ -4,6 +4,7 @@ import type { SocketStatus } from '../../api/socket'
 import { isSeat, type RoomSummary } from '../../api/types'
 import { formatDuration, quotePreview } from '../../lib/presentation'
 import { useRoom } from '../../hooks/useRoom'
+import { useVoiceAvailable } from '../../hooks/useVoiceAvailable'
 import { recordVisit, removeEntry } from '../../lib/history'
 import { forgetCode } from '../../lib/identity'
 import { inviteUrl } from '../../lib/route'
@@ -41,6 +42,7 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
     warning, reportNotice, banRetryAfter, report, dismissWarning, dismissReportNotice,
     kickVote, voted, kickNotice, kick, vote, takeSeat, dismissKickNotice,
   } = useRoom(roomId, code, spectate)
+  const voiceEnabled = useVoiceAvailable()
   const info = room ?? fallback
   const [replyId, setReplyId] = useState<number | null>(null)
   const [highlightId, setHighlightId] = useState<number | null>(null)
@@ -331,6 +333,7 @@ export function RoomView({ roomId, fallback, code, onSubmitCode, onRetake, spect
         onSend={send}
         replyTo={replyTarget && { id: replyTarget.id, speaker: replyTarget.speaker, preview: quotePreview(replyTarget.text) }}
         onCancelReply={() => setReplyId(null)}
+        voiceEnabled={voiceEnabled}
       />
     </div>
   )
