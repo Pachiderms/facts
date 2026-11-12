@@ -28,6 +28,24 @@ _CHECKABLE_RE = re.compile(
 )
 
 
+# Un chiffre ou une quantité, hors simples références (« selon », « étude »…).
+_FIGURE_RE = re.compile(
+    r"\d|%|\b(?:milliards?|millions?|milliers?|dizaines?|centaines?|pourcent\w*|moiti[ée]|tiers|quarts?)\b"
+    r"|\bfois\s+(?:plus|moins)\b|\b(?:doubl|tripl)\w*",
+    re.IGNORECASE,
+)
+# Position personnelle : le chiffre n'y est qu'un jugement (« 35 heures, c'est trop peu, c'est mon avis »).
+_OPINION_RE = re.compile(
+    r"\b(?:je\s+(?:trouve|pense|crois|estime|considère|préfère|suis\s+(?:pour|contre|favorable|opposé))|selon\s+moi|à\s+mon\s+avis|mon\s+avis|personnellement)\b",
+    re.IGNORECASE,
+)
+
+
+def is_quantified_assertion(text: str) -> bool:
+    """Chiffre ou quantité avancés sans formule d'opinion : ne doit pas être écarté sur un simple « doute » du tri."""
+    return bool(_FIGURE_RE.search(text)) and not _OPINION_RE.search(text)
+
+
 def is_checkable(text: str) -> bool:
     return bool(_CHECKABLE_RE.search(text))
 
@@ -139,6 +157,10 @@ class TriagingMessageChecker:
             return await self._call(result.claim, context)
         if result.outcome == "unavailable":
             return await self._call(text, context) if is_checkable(text) else MessageCheck.unchecked("NON ÉVALUÉ")
+        if is_quantified_assertion(text):
+            # Filet : le modèle de tri est un second avis, pas un veto sur un chiffre (ex. « Cela pourrait entraîner
+            # une baisse de 50 % des recettes »). Le vérificateur dira « non vérifiable » si rien n'est confrontable.
+            return await self._call(text, context)
         return MessageCheck.no_claim()
 
     async def _call(self, text: str, context: str | None) -> MessageCheck:

@@ -70,6 +70,10 @@ CASES: tuple[Case, ...] = (
     Case("Vous caricaturez ma position depuis le début.", False, "attaque"),
     Case("Vous ne répondez jamais aux questions qu'on vous pose.", False, "attaque", hard=True),
     Case("Encore un argument fumeux de votre part.", False, "attaque"),
+    # ---- conditionnels chiffrés : une estimation chiffrée se vérifie, même au conditionnel ----
+    Case("Cela pourrait entraîner une baisse de 50% des recettes de l'État.", True, "conditionnel chiffré", "Cela pourrait entraîner une baisse de 50% des recettes de l'État.", hard=True),
+    Case("Cette mesure coûterait 10 milliards d'euros par an au budget.", True, "conditionnel chiffré", "Cette mesure coûterait 10 milliards d'euros par an au budget.", hard=True),
+    Case("Une hausse du SMIC risque de détruire 100 000 emplois selon certains.", True, "conditionnel chiffré", "Une hausse du SMIC risque de détruire 100 000 emplois selon certains.", hard=True),
     # ---- prédictions et hypothèses ----
     Case("Cette réforme va ruiner le pays dans les années à venir.", False, "prédiction", hard=True),
     Case("Si on baisse les impôts, la croissance repartira forcément.", False, "prédiction", hard=True),
