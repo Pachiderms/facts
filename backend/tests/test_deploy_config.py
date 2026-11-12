@@ -138,3 +138,8 @@ def test_image_ships_migrations_but_no_database_secret():
 def test_render_blueprint_asks_for_the_database_url_without_a_value():
     block = RENDER.split("FACTS_DATABASE_URL", 1)[1].split("- key:", 1)[0]
     assert "sync: false" in block and "value:" not in block  # secret saisi dans le tableau de bord
+
+
+def test_render_service_is_pinned_to_frankfurt():
+    # Sans « region », Render crée le service à Oregon, et la région ne peut plus être modifiée ensuite.
+    assert "    region: frankfurt\n" in RENDER
