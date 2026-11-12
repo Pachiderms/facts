@@ -1,7 +1,7 @@
 # Blueprint Render (offre gratuite). Les secrets ne sont JAMAIS ici : ils se saisissent dans le tableau de bord.
 services:
   - type: web
-    name: facts-api
+    name: facts-api-eu
     runtime: docker
     plan: free
     # Région : Francfort (proche des utilisateurs et de la base Neon eu-central-1). Sans cette ligne, Render choisit Oregon.
