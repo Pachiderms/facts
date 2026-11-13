@@ -70,7 +70,7 @@ def _public(user: User) -> dict[str, str]:
 async def login_google(request: Request, body: GoogleLogin) -> dict:
     settings = request.app.state.settings
     service, verifier = _service(request), request.app.state.google
-    ip = get_client_ip(request, settings.trust_proxy_headers)
+    ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
     limiter = request.app.state.login_limiter
     if not limiter.allow(ip):  # avant toute vérification : le contrôle coûte du calcul et un appel réseau
         raise HTTPException(

@@ -123,3 +123,11 @@ Dans UptimeRobot, la page de détail du moniteur permet de relire les réponses 
 - **L'API ne démarre pas** : `FACTS_LLM_API_KEY` manquante (le journal Render le dit).
 - **Build du site en échec** : `VITE_API_URL` absente.
 - **Salons disparus** : l'API s'est mise en veille ou a redémarré (limite de l'offre gratuite).
+
+
+## Quotas : vérifier que l'adresse du visiteur est bien lue (Render)
+
+1. Ouvrir `https://<votre-api>.onrender.com/health/ip` dans le navigateur.
+2. `resolved_ip` doit être **votre adresse publique** (comparez avec un site « quelle est mon IP »), et rester identique à chaque rechargement. Sinon, ajustez `FACTS_PROXY_HOPS` (0, 1, 2…) sur Render en regardant `x_forwarded_for` : la bonne valeur est le nombre d'adresses qui suivent la vôtre.
+3. Le blueprint crée `FACTS_QUOTA_SALT` automatiquement. Sur un service existant, ajoutez-la à la main (une valeur aléatoire quelconque, **à ne plus changer** : la changer repart de zéro pour tout le monde) et ajoutez `FACTS_PROXY_HOPS=1`.
+4. Les compteurs sont dans Neon (migration 0004 appliquée au démarrage) : ils survivent aux veilles et redéploiements.

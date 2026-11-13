@@ -125,18 +125,23 @@ class SlidingWindowRateLimiter:
         return max(1, int(self.window - (now - dq[0])) + 1)
 
 
-def get_client_ip(request: HTTPConnection, trust_proxy_headers: bool = False) -> str:
+def get_client_ip(request: HTTPConnection, trust_proxy_headers: bool = False, proxy_hops: int = 0) -> str:
     """IP du client pour le rate limiting.
 
-    X-Forwarded-For est contrôlable par le client : on ne le lit que derrière un proxy de
-    confiance, et on prend la DERNIÈRE entrée (celle ajoutée par ce proxy), pas la première.
+    X-Forwarded-For est contrôlable par le client : on ne le lit que derrière un proxy de confiance.
+    `proxy_hops` = nombre d'adresses de PROXYS ajoutées après celle du client (0 : nginx classique, la
+    dernière entrée est le client ; 1 sur Render, où un proxy s'ajoute derrière : la dernière entrée est
+    alors un proxy partagé et changeant, pas le visiteur). On lit l'entrée à cette distance de la fin ;
+    ce que le client écrit au début de l'en-tête n'a donc aucune influence. Chaîne trop courte
+    (accès direct, hors proxy) : adresse de la connexion.
     """
     if trust_proxy_headers:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            last = forwarded.split(",")[-1].strip()
-            if last:
-                return last
+            entries = [e.strip() for e in forwarded.split(",")]
+            hops = max(0, proxy_hops)
+            if len(entries) > hops and entries[-(hops + 1)]:
+                return entries[-(hops + 1)]
     return request.client.host if request.client else "unknown"
 
 

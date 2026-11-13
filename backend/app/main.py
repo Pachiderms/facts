@@ -24,9 +24,11 @@ from app.api import voice as voice_api
 from app.core.cache import TTLCache
 from app.db.engine import Database
 from app.core.config import Settings, get_settings
-from app.core.security import DailyBudget, SlidingWindowRateLimiter
+from app.core.security import DailyBudget, SlidingWindowRateLimiter, get_client_ip
 from app.services.accounts import AccountService
 from app.services.history import HistoryService
+from app.services.quota_policy import QuotaPolicy
+from app.core.quotas import MemoryQuotas, PostgresQuotas, random_salt
 from app.services.factcheck import FactCheckService
 from app.services.google_auth import GoogleVerifier
 from app.services.claim_triage import ClaimExtractor
@@ -134,6 +136,8 @@ def create_app(
             )
         if app.state.accounts is not None and app.state.db is not None and app.state.history is None:
             app.state.history = HistoryService(app.state.db)
+        if app.state.db is not None and isinstance(app.state.quota_policy.store, MemoryQuotas):
+            app.state.quota_policy.store = PostgresQuotas(app.state.db, fallback=app.state.quota_policy.store)
         stt_owned = None
         if app.state.stt is None and settings.voice_available:
             app.state.stt = stt_owned = GroqWhisper(
@@ -173,9 +177,12 @@ def create_app(
     app.state.rooms = rooms or (build_rooms(settings, service) if service is not None else None)
     app.state.ws_connections = Counter()  # connexions WebSocket ouvertes, par IP
     app.state.ws_limiter = SlidingWindowRateLimiter(settings.ws_messages_per_minute, 60)
-    app.state.daily_check_limiter = SlidingWindowRateLimiter(settings.daily_check_limit, 86_400)
-    app.state.account_check_limiter = SlidingWindowRateLimiter(settings.account_daily_check_limit, 86_400)
-    app.state.ip_backstop_limiter = SlidingWindowRateLimiter(settings.daily_check_limit * 4, 86_400)
+    salt = settings.quota_salt or random_salt()
+    if db is None and not settings.database_url.get_secret_value():
+        pass  # sans base : quotas en mémoire
+    elif not settings.quota_salt:
+        logging.getLogger("facts.quotas").warning("FACTS_QUOTA_SALT absent : les quotas durables changent de clé à chaque démarrage")
+    app.state.quota_policy = QuotaPolicy(PostgresQuotas(db) if db is not None else MemoryQuotas(), settings, salt)
     app.state.llm = None
     app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
     app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
@@ -222,6 +229,20 @@ def create_app(
     async def health() -> dict[str, str | int]:
         # Durée depuis le démarrage : une valeur qui retombe à ~0 trahit un redémarrage (et donc des salons perdus).
         return {"status": "ok", "uptime_seconds": int(time.monotonic() - app.state.started)}
+
+    @app.get("/health/ip", include_in_schema=False, dependencies=[Depends(enforce_read_rate_limit)])
+    async def health_ip(request: Request) -> dict[str, str | int | bool | None]:
+        """Diagnostic : ce que le serveur voit de VOTRE connexion (n'expose que les en-têtes de l'appelant).
+
+        Sert à régler FACTS_PROXY_HOPS : `resolved_ip` doit être votre adresse publique, identique d'une requête à l'autre.
+        """
+        return {
+            "x_forwarded_for": request.headers.get("x-forwarded-for"),
+            "connection_ip": request.client.host if request.client else None,
+            "resolved_ip": get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops),
+            "trust_proxy_headers": settings.trust_proxy_headers,
+            "proxy_hops": settings.proxy_hops,
+        }
 
     @app.get("/health/db", include_in_schema=False, dependencies=[Depends(enforce_read_rate_limit)])
     async def health_db() -> JSONResponse:

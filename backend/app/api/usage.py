@@ -5,8 +5,7 @@ Identité : session facultative (compte gratuit) ; sans session, quota par IP. L
 
 from fastapi import APIRouter, Depends, Request
 
-from app.api.deps import enforce_read_rate_limit, optional_user
-from app.core.security import get_client_ip
+from app.api.deps import enforce_read_rate_limit, quota_who
 
 router = APIRouter(prefix="/api/v1", tags=["usage"])
 
@@ -14,15 +13,7 @@ router = APIRouter(prefix="/api/v1", tags=["usage"])
 @router.get("/usage", dependencies=[Depends(enforce_read_rate_limit)])
 async def usage(request: Request) -> dict:
     state = request.app.state
-    user = await optional_user(request)
-    if user is not None:
-        limiter, key, plan = state.account_check_limiter, str(user.id), "free"
-    else:
-        limiter, key, plan = state.daily_check_limiter, get_client_ip(request, state.settings.trust_proxy_headers), "anonymous"
-    used = limiter.used(key)
+    data = await state.quota_policy.usage(await quota_who(request))
     llm = getattr(state, "llm", None)
-    return {
-        "plan": plan,
-        "checks": {"used": used, "limit": limiter.max_requests, "remaining": max(0, limiter.max_requests - used)},
-        "degraded": bool(llm is not None and getattr(llm, "degraded", False)),
-    }
+    data["degraded"] = bool(llm is not None and getattr(llm, "degraded", False))
+    return data

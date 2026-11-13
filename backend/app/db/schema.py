@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, MetaData, String, Table, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Integer, ForeignKey, Index, MetaData, String, Table, Uuid, func
 from sqlalchemy.sql import expression
 
 # Noms de contraintes prévisibles : les migrations peuvent les retrouver et les supprimer.
@@ -75,4 +75,15 @@ user_rooms = Table(
     Column("pinned", Boolean, nullable=False, server_default=expression.false()),
     Column("last_visit", BigInteger, nullable=False),
     CheckConstraint("visibility IN ('public', 'private')", name="visibility"),
+)
+
+# Compteurs de quotas par jour UTC (durables : un redémarrage du serveur gratuit ne les remet plus à zéro).
+# `key` = empreinte salée (HMAC) d'une IP ou identité de compte : jamais d'adresse IP en clair. Purgés après 2 jours.
+usage_counters = Table(
+    "usage_counters",
+    metadata,
+    Column("kind", String(24), primary_key=True),
+    Column("key", String(64), primary_key=True),
+    Column("day", Date, primary_key=True),
+    Column("count", Integer, nullable=False, server_default="0"),
 )

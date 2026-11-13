@@ -6,7 +6,13 @@ import { clearSession, setSession } from '../src/lib/session'
 
 const TOKEN = 'T'.repeat(43)
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
-const usage = (over = {}) => ({ plan: 'anonymous', checks: { used: 5, limit: 30, remaining: 25 }, degraded: false, ...over })
+const usage = (over = {}) => ({
+  plan: 'anonymous',
+  checks: { used: 5, limit: 30, remaining: 25 },
+  debate: { used: 10, limit: 40, remaining: 30 },
+  degraded: false,
+  ...over,
+})
 
 let fetchMock: MockInstance<typeof fetch>
 beforeEach(() => {
@@ -27,7 +33,7 @@ describe('fetchUsage', () => {
   })
 
   it('rejette une réponse hors contrat', async () => {
-    for (const bad of [{}, usage({ plan: 'pro' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } })]) {
+    for (const bad of [{}, usage({ plan: 'pro' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } }), usage({ debate: undefined }), usage({ debate: { used: 1 } })]) {
       fetchMock.mockResolvedValueOnce(json(bad))
       await expect(fetchUsage()).rejects.toThrow()
     }
@@ -49,6 +55,13 @@ describe('UsageNote', () => {
     fetchMock.mockResolvedValue(json(usage({ checks: { used: 29, limit: 30, remaining: 1 } })))
     render(<UsageNote refreshKey={1} />)
     expect(await screen.findByText(/1 vérification restante aujourd’hui/)).toBeTruthy()
+  })
+
+  it('budget du débat : texte dédié, messages toujours publiés au-delà', async () => {
+    fetchMock.mockImplementation(async () => json(usage()))
+    render(<UsageNote kind="debate" refreshKey={0} />)
+    expect(await screen.findByText(/30 messages vérifiés possibles aujourd’hui sur 40/)).toBeTruthy()
+    expect(screen.getByText(/restent publiés sans vérification/)).toBeTruthy()
   })
 
   it('limite atteinte et service dégradé', async () => {

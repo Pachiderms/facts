@@ -5,7 +5,7 @@ Aucun secret n'est codé en dur : la clé LLM vient de FACTS_LLM_API_KEY.
 
 from functools import lru_cache
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
     # Ne faire confiance à X-Forwarded-For que derrière un proxy maîtrisé.
     trust_proxy_headers: bool = False
+    # Adresses de proxys ajoutées APRÈS celle du client dans X-Forwarded-For (Render : 1). Voir /health/ip.
+    proxy_hops: int = Field(default=0, ge=0, le=5)
 
     # Base de données PostgreSQL (Neon, Supabase…). Vide = tout reste en mémoire, comme avant. SecretStr : jamais
     # affichée dans un journal, un repr ou une trace (l'adresse contient le mot de passe).
@@ -65,6 +67,13 @@ class Settings(BaseSettings):
     daily_check_limit: int = 30  # visiteur sans compte, par IP
     account_daily_check_limit: int = 60  # compte gratuit, par compte (l'IP garde un plafond large : daily_check_limit x 4)
     daily_ws_message_limit: int = 200
+    # Messages de débat qui déclenchent une vérification (appel LLM + recherche), par jour UTC.
+    debate_daily_checks: int = 40  # sans compte, par IP
+    account_debate_daily_checks: int = 120  # compte gratuit, par compte
+    debate_global_daily_checks: int = 300  # tous salons : le reste du plafond d'appels LLM est réservé au chatbot
+    # Sel des empreintes de quotas (IP jamais stockées en clair). DOIT être fixe en production avec une base :
+    # vide = sel aléatoire à chaque démarrage (quotas durables inopérants).
+    quota_salt: str = ""
 
     # Tri des messages par le LLM : repère les faits sans chiffre. Coûte un appel LLM par message long sans chiffre ;
     # désactiver (FACTS_CLAIM_TRIAGE=false) pour revenir à la règle gratuite seule.

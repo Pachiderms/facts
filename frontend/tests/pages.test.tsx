@@ -272,7 +272,10 @@ describe('Création d’un salon', () => {
   const fetchMock = vi.fn()
   beforeEach(() => {
     fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
+    // Le budget affiché (UsageNote) est testé à part : son appel ne doit pas fausser le décompte ici.
+    vi.stubGlobal('fetch', (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith('/api/v1/usage') ? Promise.reject(new TypeError('hors sujet')) : fetchMock(url, init),
+    )
     hooks.useRooms.mockReturnValue({ rooms: [], error: null })
   })
   afterEach(() => vi.unstubAllGlobals())

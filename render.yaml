@@ -17,6 +17,13 @@ services:
       # Derrière le proxy de Render : l'IP réelle vient de X-Forwarded-For (dernière entrée).
       - key: FACTS_TRUST_PROXY_HEADERS
         value: "true"
+      # Render ajoute son proxy APRÈS l'adresse du visiteur : sans ce réglage, tous les quotas par IP seraient
+      # faux. Vérifier avec https://<votre-api>.onrender.com/health/ip (resolved_ip = votre adresse publique).
+      - key: FACTS_PROXY_HOPS
+        value: "1"
+      # Sel des empreintes de quotas (les IP ne sont jamais stockées en clair). Généré une fois, ne pas changer.
+      - key: FACTS_QUOTA_SALT
+        generateValue: true
       # Adresse EXACTE du front (https://xxx.pages.dev), sans slash final. Sert à CORS et aux WebSockets.
       - key: FACTS_CORS_ORIGINS
         sync: false

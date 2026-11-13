@@ -261,3 +261,10 @@ Tests : `test_account_identity.py` (sans base) et `test_account_rooms_api.py` (v
 - La tier Pro (PR L) s'ajoutera comme un troisième plan avec son propre plafond.
 
 Tests : `test_llm_resilient.py`, `test_usage_quotas.py` (+ contrôle par mutations).
+
+## Quotas durables, budget du débat et IP derrière Render (PR K, suite)
+
+- **Cause du compteur qui ne baissait pas** : sur Render, un proxy s'ajoute *après* l'adresse du visiteur dans `X-Forwarded-For`. L'ancienne règle (« dernière entrée ») lisait donc l'adresse de ce proxy, partagée par des visiteurs différents et changeante d'une requête à l'autre. `FACTS_PROXY_HOPS` (1 sur Render, réglé dans `render.yaml`) donne le nombre de proxys à sauter ; le début de l'en-tête, écrit par le client, n'a aucune influence. **Diagnostic** : `GET /health/ip` montre l'en-tête reçu et l'adresse retenue (`resolved_ip` doit être votre adresse publique, stable).
+- **Compteurs durables** (`app/core/quotas.py`, table `usage_counters`, migration 0004) : fenêtre = jour UTC, un seul UPSERT conditionnel (atomique sous concurrence), clés = empreintes HMAC salées (`FACTS_QUOTA_SALT`, fixe) donc aucune IP en clair, purge des jours anciens. Base injoignable : repli mémoire. Sans base : mémoire (comme avant).
+- **Budget du débat** (`QuotaPolicy`) : un message de débat qui déclenche une vérification consomme `debate` (40/jour sans compte, 120 avec compte gratuit), filet par IP à 4 × pour les comptes, et un budget global `debate_global_daily_checks` (300) qui laisse le reste du plafond d'appels LLM au chatbot. Au-delà, le message est **publié sans vérification** (badge « QUOTA DU JOUR ATTEINT »). Les messages qui n'ont rien à vérifier ne coûtent rien. Budgets du chatbot et du débat indépendants.
+- `GET /api/v1/usage` renvoie maintenant aussi `debate`.
