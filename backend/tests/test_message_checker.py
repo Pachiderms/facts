@@ -3,7 +3,7 @@ import pytest
 from app.core.schemas import CheckResponse, Source, View
 from app.core.security import InvalidInputError
 from app.services.factcheck import PromptInjectionError
-from app.services.message_checker import FactCheckMessageChecker, MessageCheck, is_checkable
+from app.services.message_checker import NOTE_MAX_CHARS, FactCheckMessageChecker, MessageCheck, is_checkable
 
 
 @pytest.mark.parametrize(
@@ -72,7 +72,7 @@ async def test_verdict_mapping(verdict, status, badge):
 
 async def test_note_and_sources_are_bounded():
     check = await FactCheckMessageChecker(FakeService(response("VRAI"))).check("12")
-    assert len(check.note) <= 300 and len(check.sources) == 3
+    assert len(check.note) <= NOTE_MAX_CHARS and len(check.sources) == 3
     assert set(check.sources[0]) == {"title", "url", "domain"}
 
 
@@ -94,9 +94,10 @@ async def test_note_is_never_cut_mid_sentence():
     r.summary = (
         "Le taux de pauvreté en France est de 15,4 % en 2024, mais il est stable depuis 2023 et n'a pas connu de hausse "
         "récente marquée. Aucun élément des sources ne permet de confirmer que l'augmentation du SMIC réduirait la pauvreté. "
-        "Une troisième phrase qui dépasse largement la limite de trois cents caractères autorisée pour la note affichée sous le message."
+        "Une troisième phrase qui dépasse largement la limite de caractères autorisée pour la note affichée sous le message, "
+        "puisqu'elle développe longuement un point secondaire que personne n'a demandé et que la note ne peut donc pas contenir en entier."
     )
     check = await FactCheckMessageChecker(FakeService(r)).check("15,4 %")
-    assert check.note.endswith(".") and len(check.note) <= 300
+    assert check.note.endswith(".") and len(check.note) <= NOTE_MAX_CHARS
     assert "l'augmentation du SMIC réduirait la pauvreté." in check.note
     assert "troisième" not in check.note

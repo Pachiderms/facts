@@ -268,3 +268,10 @@ Tests : `test_llm_resilient.py`, `test_usage_quotas.py` (+ contrôle par mutatio
 - **Compteurs durables** (`app/core/quotas.py`, table `usage_counters`, migration 0004) : fenêtre = jour UTC, un seul UPSERT conditionnel (atomique sous concurrence), clés = empreintes HMAC salées (`FACTS_QUOTA_SALT`, fixe) donc aucune IP en clair, purge des jours anciens. Base injoignable : repli mémoire. Sans base : mémoire (comme avant).
 - **Budget du débat** (`QuotaPolicy`) : un message de débat qui déclenche une vérification consomme `debate` (40/jour sans compte, 120 avec compte gratuit), filet par IP à 4 × pour les comptes, et un budget global `debate_global_daily_checks` (300) qui laisse le reste du plafond d'appels LLM au chatbot. Au-delà, le message est **publié sans vérification** (badge « QUOTA DU JOUR ATTEINT »). Les messages qui n'ont rien à vérifier ne coûtent rien. Budgets du chatbot et du débat indépendants.
 - `GET /api/v1/usage` renvoie maintenant aussi `debate`.
+
+## Messages à plusieurs faits (correctif)
+
+Un message de débat qui combine des faits (« la majorité des véhicules sont thermiques. Avec 15 % de pauvres, il sera difficile de… ») se vérifie **en entier**, pas sur son premier fait :
+- le prompt de tri demande un seul extrait continu qui couvre tous les faits et la conclusion (règle 9) ;
+- `widen_claim` (déterministe, indépendant du modèle) élargit l'extrait aux phrases voisines qui avancent un chiffre qu'il ne couvre pas (sans phrases d'opinion, sans dépasser 500 caractères) ;
+- le générateur de requêtes produit une requête par fait, et l'analyse évalue chaque fait puis si la conclusion en découle (VRAI seulement si tous les faits sont étayés et la conclusion raisonnable ; une prédiction n'est jamais « confirmée »). La note sous le message peut aller jusqu'à 420 caractères.

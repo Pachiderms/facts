@@ -26,6 +26,9 @@ CASES: tuple[Case, ...] = (
     Case("La moitié des Français vit avec moins de 2 000 euros par mois.", True, "fait chiffré", "La moitié des Français vit avec moins de 2 000 euros par mois."),
     Case("Les prix de l'énergie ont doublé en dix ans.", True, "fait chiffré", "Les prix de l'énergie ont doublé en dix ans."),
     Case("Cela rapporterait des centaines de millions d'euros chaque année.", True, "fait chiffré", hard=True, fact="Cela rapporterait des centaines de millions d'euros chaque année."),
+    # ---- faits COMBINÉS : le sens tient à leur association, l'extrait doit les couvrir tous ----
+    Case("Les véhicules thermiques représentent la majorité des véhicules actuellement. Avec 15 % des Français vivant sous le seuil de pauvreté, il sera compliqué pour tous ces gens d'échanger de voiture en moins de 10 ans.", True, "faits combinés", "Les véhicules thermiques représentent la majorité des véhicules actuellement. Avec 15 % des Français vivant sous le seuil de pauvreté, il sera compliqué pour tous ces gens d'échanger de voiture en moins de 10 ans.", hard=True),
+    Case("Le SMIC a augmenté de 12 % depuis 2021 alors que l'inflation cumulée est de 15 %. Les salariés au SMIC ont donc perdu du pouvoir d'achat.", True, "faits combinés", "Le SMIC a augmenté de 12 % depuis 2021 alors que l'inflation cumulée est de 15 %. Les salariés au SMIC ont donc perdu du pouvoir d'achat.", hard=True),
     # ---- affirmations factuelles SANS chiffre (point faible de la règle) ----
     Case("Le gouvernement a supprimé l'ISF en 2017.", True, "fait sans chiffre", "Le gouvernement a supprimé l'ISF en 2017."),
     Case("Le gouvernement a supprimé l'impôt sur la fortune au début du quinquennat.", True, "fait sans chiffre", "Le gouvernement a supprimé l'impôt sur la fortune au début du quinquennat."),
