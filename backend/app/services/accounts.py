@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.identity import is_valid_token, participant_id
 from app.db.engine import Database
-from app.db.schema import sessions, subscriptions, user_participants, user_rooms, users
+from app.db.schema import login_codes, sessions, subscriptions, user_participants, user_rooms, users
 from app.services.google_auth import GoogleIdentity
 
 SESSION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")  # token_urlsafe(32)
@@ -55,6 +55,17 @@ class AccountService:
         async with self._db.session() as s:
             row = (await s.execute(select(users).where(users.c.google_sub == identity.sub))).mappings().first()
             if row is None:
+                # Même adresse déjà utilisée par e-mail (sans Google) : c'est le même compte. L'adresse Google est
+                # vérifiée par Google et celle du compte l'a été par code : personne ne peut s'approprier celle d'autrui.
+                row = (
+                    await s.execute(
+                        update(users)
+                        .where(users.c.email == identity.email, users.c.google_sub.is_(None))
+                        .values(google_sub=identity.sub, last_login_at=now)
+                        .returning(users)
+                    )
+                ).mappings().first()
+            if row is None:
                 stmt = (
                     pg_insert(users)
                     .values(google_sub=identity.sub, email=identity.email)
@@ -74,21 +85,38 @@ class AccountService:
                         )
                 except IntegrityError:  # sa nouvelle adresse Google appartient déjà à un autre compte
                     raise AccountError("Adresse déjà associée à un autre compte.") from None
-            user_id = row["id"]
+            await self._open_session(s, row["id"], token, now, participant_token)
+        return token, User(row["id"], identity.email, row["created_at"])
+
+    async def login_email(self, email: str, participant_token: str | None = None) -> tuple[str, User]:
+        """Connexion par code e-mail (déjà vérifié par l'appelant) : compte existant de cette adresse, ou création."""
+        now = _now()
+        token = secrets.token_urlsafe(32)
+        async with self._db.session() as s:
+            row = (await s.execute(select(users).where(users.c.email == email))).mappings().first()
+            if row is None:
+                stmt = pg_insert(users).values(google_sub=None, email=email).on_conflict_do_nothing().returning(users)
+                row = (await s.execute(stmt)).mappings().first()
+                if row is None:  # course : une autre connexion a créé le compte entre-temps
+                    row = (await s.execute(select(users).where(users.c.email == email))).mappings().one()
+            else:
+                await s.execute(update(users).where(users.c.id == row["id"]).values(last_login_at=now))
+            await self._open_session(s, row["id"], token, now, participant_token)
+        return token, User(row["id"], row["email"], row["created_at"])
+
+    async def _open_session(self, s, user_id, token: str, now: datetime, participant_token: str | None) -> None:
+        await s.execute(
+            pg_insert(sessions).values(user_id=user_id, token_hash=hash_token(token), expires_at=now + self._ttl)
+        )
+        # Plafond de sessions par compte : les plus anciennes sautent (un jeton volé ne s'accumule pas).
+        keep = select(sessions.c.id).where(sessions.c.user_id == user_id).order_by(sessions.c.created_at.desc()).limit(self._max_sessions)
+        await s.execute(delete(sessions).where(sessions.c.user_id == user_id, sessions.c.id.not_in(keep)))
+        if participant_token is not None and is_valid_token(participant_token):
             await s.execute(
-                pg_insert(sessions).values(user_id=user_id, token_hash=hash_token(token), expires_at=now + self._ttl)
+                pg_insert(user_participants)
+                .values(participant_id=participant_id(participant_token), user_id=user_id)
+                .on_conflict_do_nothing()  # une identité déjà liée à un autre compte reste à ce compte
             )
-            # Plafond de sessions par compte : les plus anciennes sautent (un jeton volé ne s'accumule pas).
-            keep = select(sessions.c.id).where(sessions.c.user_id == user_id).order_by(sessions.c.created_at.desc()).limit(self._max_sessions)
-            await s.execute(delete(sessions).where(sessions.c.user_id == user_id, sessions.c.id.not_in(keep)))
-            if participant_token is not None and is_valid_token(participant_token):
-                await s.execute(
-                    pg_insert(user_participants)
-                    .values(participant_id=participant_id(participant_token), user_id=user_id)
-                    .on_conflict_do_nothing()  # une identité déjà liée à un autre compte reste à ce compte
-                )
-            created = row["created_at"]
-        return token, User(user_id, identity.email, created)
 
     async def authenticate(self, token: str) -> User | None:
         if not SESSION_TOKEN_RE.fullmatch(token or ""):
@@ -139,7 +167,7 @@ class AccountService:
                 "email": user["email"],
                 "created_at": user["created_at"].isoformat(),
                 "last_login_at": user["last_login_at"].isoformat(),
-                "login_method": "google",
+                "login_method": "google" if user["google_sub"] else "email",
             },
             "sessions": [{k: v.isoformat() for k, v in r.items()} for r in session_rows],
             "linked_anonymous_identities": linked,
@@ -160,4 +188,7 @@ class AccountService:
     async def delete_account(self, user_id: UUID) -> None:
         """Suppression définitive : le compte, ses sessions et ses rattachements (cascade en base)."""
         async with self._db.session() as s:
+            email = (await s.execute(select(users.c.email).where(users.c.id == user_id))).scalar_one_or_none()
             await s.execute(delete(users).where(users.c.id == user_id))
+            if email is not None:
+                await s.execute(delete(login_codes).where(login_codes.c.email == email))

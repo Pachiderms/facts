@@ -6,6 +6,8 @@ import {
   fetchMe,
   getFeatures,
   loginWithGoogle,
+  requestEmailCode,
+  verifyEmailCode,
   logoutEverywhere,
   logoutSession,
   type AccountUser,
@@ -17,10 +19,16 @@ export interface AuthState {
   /** Les comptes sont proposés (serveur configuré). Sinon l'interface n'affiche rien. */
   enabled: boolean
   googleClientId: string | null
+  /** Connexion par code e-mail proposée. */
+  emailLogin: boolean
   user: AccountUser | null
   loading: boolean
   error: string | null
   signIn: (credential: string) => Promise<void>
+  /** Envoie un code ; renvoie un message d'erreur, ou null si l'envoi a été demandé. */
+  requestCode: (email: string) => Promise<string | null>
+  /** Vérifie le code ; renvoie un message d'erreur, ou null si la session est ouverte. */
+  signInWithEmail: (email: string, code: string) => Promise<string | null>
   signOut: () => Promise<void>
   signOutEverywhere: () => Promise<void>
   download: () => Promise<Blob | null>
@@ -31,10 +39,13 @@ export interface AuthState {
 const DISABLED: AuthState = {
   enabled: false,
   googleClientId: null,
+  emailLogin: false,
   user: null,
   loading: false,
   error: null,
   signIn: async () => {},
+  requestCode: async () => 'Indisponible.',
+  signInWithEmail: async () => 'Indisponible.',
   signOut: async () => {},
   signOutEverywhere: async () => {},
   download: async () => null,
@@ -51,6 +62,7 @@ const message = (e: unknown) => (e instanceof ApiError ? e.message : 'Une erreur
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(false)
   const [googleClientId, setGoogleClientId] = useState<string | null>(null)
+  const [emailLogin, setEmailLogin] = useState(false)
   const [user, setUser] = useState<AccountUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -64,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!alive) return
       setEnabled(features.accounts)
       setGoogleClientId(features.googleClientId)
+      setEmailLogin(features.emailLogin)
       const token = features.accounts ? getSession() : null
       if (token) {
         try {
@@ -93,6 +106,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const requestCode = useCallback(async (email: string) => {
+    try {
+      await requestEmailCode(email)
+      return null
+    } catch (e) {
+      return message(e)
+    }
+  }, [])
+
+  const signInWithEmail = useCallback(async (email: string, code: string) => {
+    try {
+      const { sessionToken, user: me } = await verifyEmailCode(email, code)
+      setSession(sessionToken)
+      setUser(me)
+      setError(null)
+      return null
+    } catch (e) {
+      return message(e)
+    }
+  }, [])
+
   const endSession = useCallback(async (revoke: (t: string) => Promise<unknown>) => {
     const token = getSession()
     clearSession()
@@ -110,10 +144,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       enabled,
       googleClientId,
+      emailLogin,
       user,
       loading,
       error,
       signIn,
+      requestCode,
+      signInWithEmail,
       signOut: () => endSession(logoutSession),
       signOutEverywhere: () => endSession(logoutEverywhere),
       download: async () => {
@@ -141,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       clearError: () => setError(null),
     }),
-    [enabled, googleClientId, user, loading, error, signIn, endSession],
+    [enabled, googleClientId, emailLogin, user, loading, error, signIn, requestCode, signInWithEmail, endSession],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

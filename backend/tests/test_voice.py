@@ -50,7 +50,7 @@ def test_transcribes_and_returns_text():
 
 
 def test_features_reports_voice_flag():
-    assert make().get("/api/v1/features").json() == {"voice": True, "accounts": False, "google_client_id": None}
+    assert make().get("/api/v1/features").json() == {"voice": True, "accounts": False, "google_client_id": None, "email_login": False}
     off = TestClient(create_app(Settings(_env_file=None)))
     assert off.get("/api/v1/features").json()["voice"] is False
 

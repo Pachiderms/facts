@@ -24,6 +24,11 @@ services:
       # Sel des empreintes de quotas (les IP ne sont jamais stockées en clair). Généré une fois, ne pas changer.
       - key: FACTS_QUOTA_SALT
         generateValue: true
+      # Connexion par e-mail (Resend, offre gratuite). Désactivée tant que ces deux valeurs sont vides.
+      - key: FACTS_RESEND_API_KEY
+        sync: false
+      - key: FACTS_EMAIL_FROM
+        sync: false
       # Paiement Pro (Lemon Squeezy) : ÉTEINT par défaut. Ne passer à "true" qu'après la création de la
       # micro-entreprise, du produit chez le prestataire et de ces trois variables (voir DEPLOIEMENT.md).
       - key: FACTS_PAYMENTS_ENABLED

@@ -32,7 +32,7 @@ users = Table(
     "users",
     metadata,
     Column("id", Uuid, primary_key=True, default=uuid.uuid4, server_default=func.gen_random_uuid()),
-    Column("google_sub", String(255), nullable=False, unique=True),
+    Column("google_sub", String(255), nullable=True, unique=True),  # vide : compte créé par e-mail seulement
     Column("email", String(320), nullable=False, unique=True),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("last_login_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
@@ -111,4 +111,16 @@ billing_events = Table(
     metadata,
     Column("event_id", String(64), primary_key=True),
     Column("received_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+# Codes de connexion par e-mail (un seul actif par adresse). On ne garde que l'empreinte salée du code (HMAC) :
+# une fuite de la base ne donne aucun code valide. Expirés puis purgés ; supprimés dès qu'ils servent.
+login_codes = Table(
+    "login_codes",
+    metadata,
+    Column("email", String(320), primary_key=True),
+    Column("code_hash", String(64), nullable=False),
+    Column("attempts", Integer, nullable=False, server_default="0"),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )

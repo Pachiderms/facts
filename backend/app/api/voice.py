@@ -46,7 +46,8 @@ async def features(request: Request) -> dict:
     return {
         "voice": app.state.stt is not None,
         "accounts": accounts,
-        "google_client_id": app.state.settings.google_client_id.strip() if accounts else None,
+        "google_client_id": app.state.settings.google_client_id.strip() if accounts and app.state.google is not None else None,
+        "email_login": getattr(app.state, "email_login", None) is not None,
     }
 
 

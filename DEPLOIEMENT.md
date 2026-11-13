@@ -165,3 +165,23 @@ Le code est livré **éteint** (`FACTS_PAYMENTS_ENABLED=false`) : la page Tarifs
 - Un abonné Pro a des plafonds plus hauts (`FACTS_PRO_DAILY_CHECK_LIMIT`, `FACTS_PRO_DEBATE_DAILY_CHECKS`), mais le budget global du débat et le plafond d'appels LLM restent communs à tous : à surveiller avant de vendre à beaucoup de monde (offre gratuite Groq : ~1 000 appels par jour).
 - Supprimer son compte efface l'abonnement côté serveur mais **ne résilie pas** la facturation chez Lemon Squeezy : l'abonné doit d'abord résilier (lien « Gérer mon abonnement »).
 - Si Render dort, Lemon Squeezy réessaie le webhook plusieurs fois ; chaque livraison est idempotente.
+
+
+## Connexion par e-mail (Resend, gratuit)
+
+Un code à 6 chiffres, valable 10 minutes et à usage unique, est envoyé à l'adresse saisie : pas de mot de passe. La fonction reste **éteinte** tant que `FACTS_RESEND_API_KEY` et `FACTS_EMAIL_FROM` ne sont pas renseignées.
+
+**Offre gratuite Resend** : 3 000 e-mails par mois, **100 par jour**, 3 domaines (vérifié sur resend.com/pricing). Le serveur plafonne donc les envois à 80 par jour au total (`FACTS_EMAIL_DAILY_GLOBAL`), 5 par adresse et par jour, 10 par IP et par jour : au-delà, l'envoi répond « momentanément indisponible » sans rien dépenser. Si l'usage grandit, c'est la limite à relever (offre payante) avant la connexion Google, qui n'a aucun coût.
+
+**Mise en place**
+1. Créer un compte sur resend.com, puis *Domains → Add Domain* avec `cafaitdebat.fr` (région Europe si proposée).
+2. Resend affiche des enregistrements DNS (SPF, DKIM, éventuellement MX pour le retour d'erreurs). Les ajouter dans Cloudflare → DNS pour `cafaitdebat.fr`, en **DNS only** (nuage gris), puis cliquer *Verify*. L'attente va de quelques minutes à quelques heures.
+3. *API Keys → Create API Key* (permission « Sending access », limitée à ce domaine).
+4. Sur Render, renseigner `FACTS_RESEND_API_KEY` (la clé, qui commence par `re_`) et `FACTS_EMAIL_FROM` (par exemple `CaFaitDebat <connexion@cafaitdebat.fr>`).
+5. Redéployer : `GET /api/v1/features` doit renvoyer `"email_login": true` et un bouton « Se connecter par e-mail » apparaît dans l'en-tête.
+
+**À savoir**
+- Une adresse déjà utilisée avec Google et la même adresse par e-mail ouvrent le **même compte** (l'adresse est vérifiée dans les deux cas).
+- Le code n'est stocké que sous forme d'empreinte salée : `FACTS_QUOTA_SALT` doit rester fixe (un changement invalide seulement les codes en cours).
+- Les messages peuvent atterrir en courrier indésirable les premiers jours ; le formulaire le rappelle.
+- Avant l'ouverture publique, renseigner l'éditeur dans `frontend/src/lib/legal.ts` : la politique de confidentialité cite Resend comme sous-traitant.

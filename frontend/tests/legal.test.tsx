@@ -55,7 +55,7 @@ describe('pages légales', () => {
     for (const host of [/Cloudflare/, /Render/, /Neon/]) expect(screen.getByText(host)).toBeInTheDocument()
     unmount()
     const priv = render(<LegalPage doc="confidentialite" />)
-    for (const word of [/Groq/, /Lemon Squeezy/, /Google/, /CNIL/, /supprimer votre compte/]) expect(screen.getAllByText(word).length).toBeGreaterThan(0)
+    for (const word of [/Groq/, /Lemon Squeezy/, /Google/, /Resend/, /code à usage unique/, /CNIL/, /supprimer votre compte/]) expect(screen.getAllByText(word).length).toBeGreaterThan(0)
     priv.unmount()
     render(<LegalPage doc="cgu" />)
     for (const word of [/rétractation/, /résiliation/, /Lemon Squeezy/]) expect(screen.getAllByText(word).length).toBeGreaterThan(0)

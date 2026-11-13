@@ -1,6 +1,7 @@
-import { ChevronDown, Download, LogOut, Trash2, User } from 'lucide-react'
+import { ChevronDown, Download, LogOut, Mail, Trash2, User } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { EmailLoginForm } from './EmailLoginForm'
 import { GoogleSignInButton } from './GoogleSignInButton'
 
 /** Connexion facultative : sans compte, tout fonctionne comme avant (identité anonyme du navigateur). */
@@ -36,8 +37,28 @@ export function AccountMenu() {
 
   if (!auth.user) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        {auth.googleClientId && <GoogleSignInButton clientId={auth.googleClientId} onCredential={(c) => void auth.signIn(c)} />}
+      <div ref={box} className="relative flex flex-col items-end gap-1">
+        <div className="flex items-center gap-2">
+          {auth.googleClientId && <GoogleSignInButton clientId={auth.googleClientId} onCredential={(c) => void auth.signIn(c)} />}
+          {auth.emailLogin && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              aria-haspopup="true"
+              className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-bold text-neutral-800 hover:bg-neutral-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
+            >
+              <Mail className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Se connecter par e-mail</span>
+              <span className="sm:hidden">E-mail</span>
+            </button>
+          )}
+        </div>
+        {auth.emailLogin && open && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg">
+            <EmailLoginForm onDone={() => setOpen(false)} />
+          </div>
+        )}
         {auth.error && (
           <p role="alert" className="max-w-[16rem] text-right text-[11px] font-medium text-red-800">
             {auth.error}

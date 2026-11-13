@@ -81,6 +81,17 @@ class Settings(BaseSettings):
     pro_price_label: str = ""  # libellé affiché, ex. « 5 € / mois » (le prix réel est fixé chez le prestataire)
     billing_grace_days: int = 3  # tolérance après la fin de période (retard de paiement) avant de repasser en gratuit
 
+    # Connexion par e-mail (code à usage unique envoyé par Resend, offre gratuite : 100 e-mails/jour, 3 000/mois).
+    # Active si la clé ET l'adresse d'expédition (domaine vérifié chez Resend) sont renseignées, avec la base de données.
+    resend_api_key: SecretStr = SecretStr("")
+    email_from: str = ""  # ex. « CaFaitDebat <connexion@cafaitdebat.fr> »
+    email_code_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    email_code_max_attempts: int = Field(default=5, ge=1, le=10)
+    email_resend_cooldown_seconds: int = Field(default=30, ge=0, le=600)  # délai minimal entre deux envois à une adresse
+    email_daily_per_address: int = 5  # envois par adresse et par jour (UTC)
+    email_daily_per_ip: int = 10  # envois par IP et par jour (UTC)
+    email_daily_global: int = 80  # envois au total par jour : sous le plafond gratuit du fournisseur (100)
+
     # Sel des empreintes de quotas (IP jamais stockées en clair). DOIT être fixe en production avec une base :
     # vide = sel aléatoire à chaque démarrage (quotas durables inopérants).
     quota_salt: str = ""
@@ -159,8 +170,12 @@ class Settings(BaseSettings):
         return self.stt_api_key or self.llm_api_key
 
     @property
+    def email_login_available(self) -> bool:
+        return bool(self.resend_api_key.get_secret_value().strip()) and "@" in self.email_from and bool(self.database_url.get_secret_value())
+
+    @property
     def accounts_available(self) -> bool:
-        return bool(self.google_client_id.strip()) and bool(self.database_url.get_secret_value())
+        return (bool(self.google_client_id.strip()) or self.email_login_available) and bool(self.database_url.get_secret_value())
 
     @property
     def voice_available(self) -> bool:

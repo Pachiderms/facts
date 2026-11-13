@@ -26,7 +26,9 @@ from app.db.engine import Database
 from app.core.config import Settings, get_settings
 from app.core.security import DailyBudget, SlidingWindowRateLimiter, get_client_ip
 from app.api import billing as billing_api
+from app.adapters.email import EmailSender, ResendSender
 from app.services.accounts import AccountService
+from app.services.email_login import EmailLoginService
 from app.services.billing import BillingService
 from app.services.history import HistoryService
 from app.services.quota_policy import QuotaPolicy
@@ -98,6 +100,20 @@ def build_rooms(
     return RoomRegistry.seeded(checker, settings, moderator)
 
 
+def wire_email_login(app: FastAPI) -> None:
+    """Connexion par e-mail : active si les comptes existent et qu'un expéditeur est disponible (Resend configuré, ou injecté)."""
+    settings, state = app.state.settings, app.state
+    if state.email_login is not None or state.accounts is None or state.db is None:
+        return
+    sender = state.email_sender
+    if sender is None and settings.email_login_available:
+        sender = ResendSender(settings.resend_api_key.get_secret_value().strip(), settings.email_from.strip())
+    if sender is not None:
+        state.email_login = EmailLoginService(
+            state.db, state.accounts, sender, state.quota_policy, settings, state.quota_policy._salt
+        )
+
+
 def create_app(
     settings: Settings | None = None,
     service: FactCheckService | None = None,
@@ -107,6 +123,7 @@ def create_app(
     stt: SpeechToText | None = None,
     db: Database | None = None,
     google: GoogleVerifier | None = None,
+    email_sender: EmailSender | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -128,14 +145,16 @@ def create_app(
                 max_overflow=settings.db_max_overflow,
             )
         google_owned = None
-        if app.state.accounts is None and app.state.db is not None and settings.google_client_id.strip():
-            if app.state.google is None:
+        google_wanted = bool(settings.google_client_id.strip())
+        if app.state.accounts is None and app.state.db is not None and (google_wanted or settings.email_login_available or app.state.email_sender is not None):
+            if google_wanted and app.state.google is None:
                 app.state.google = google_owned = GoogleVerifier(
                     settings.google_client_id.strip(), max_token_age_seconds=settings.google_max_token_age_seconds
                 )
             app.state.accounts = AccountService(
                 app.state.db, session_ttl_days=settings.session_ttl_days, max_sessions=settings.max_sessions_per_user
             )
+        wire_email_login(app)
         if app.state.billing is None and app.state.db is not None:
             app.state.billing = BillingService(app.state.db, grace_days=settings.billing_grace_days)
         if app.state.accounts is not None and app.state.db is not None and app.state.history is None:
@@ -196,9 +215,12 @@ def create_app(
     app.state.db = db
     app.state.google = google
     app.state.accounts = None
-    if db is not None and google is not None and settings.google_client_id.strip():
+    app.state.email_login = None
+    app.state.email_sender = email_sender
+    if db is not None and ((google is not None and settings.google_client_id.strip()) or email_sender is not None):
         app.state.accounts = AccountService(db, session_ttl_days=settings.session_ttl_days, max_sessions=settings.max_sessions_per_user)
     app.state.history = HistoryService(db) if app.state.accounts is not None and db is not None else None
+    wire_email_login(app)
     app.state.billing = BillingService(db, grace_days=settings.billing_grace_days) if db is not None else None  # lecture du plan : toujours ; vente et webhook : payments_enabled
     app.state.login_limiter = SlidingWindowRateLimiter(settings.login_attempts_per_window, settings.login_window_seconds)
     app.state.stt_minute_limiter = SlidingWindowRateLimiter(settings.stt_per_minute, 60)

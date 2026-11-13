@@ -69,8 +69,12 @@ function Confidentialite() {
             conservée en clair.
           </>,
           <>
-            <strong>Avec un compte Google</strong> : votre adresse e-mail et l’identifiant Google associé (ni nom, ni photo), des sessions
-            révocables et l’historique de vos salons (sans code d’accès).
+            <strong>Avec un compte</strong> (connexion Google ou par e-mail) : votre adresse e-mail et, pour Google, l’identifiant Google
+            associé (ni nom, ni photo), des sessions révocables et l’historique de vos salons (sans code d’accès).
+          </>,
+          <>
+            <strong>Connexion par e-mail</strong> : l’adresse saisie sert à vous envoyer un code à usage unique. Seule une empreinte
+            chiffrée de ce code est conservée, 10 minutes au plus, puis supprimée dès qu’il a servi.
           </>,
           <>
             <strong>Texte soumis</strong> : les affirmations à vérifier et les messages de débat sont envoyés à un service d’IA et à des moteurs
@@ -97,7 +101,7 @@ function Confidentialite() {
       <UL
         items={[
           'Hébergement : Cloudflare, Render, Neon (voir mentions légales).',
-          'Connexion : Google (identification par jeton ; aucun cookie publicitaire de notre part).',
+          'Connexion : Google (identification par jeton ; aucun cookie publicitaire de notre part) et Resend (envoi des e-mails contenant le code de connexion).',
           'Intelligence artificielle : Groq (traitement du texte à vérifier).',
           'Paiement et facturation : Lemon Squeezy, qui agit comme vendeur (marchand de référence) et gère la TVA.',
         ]}
@@ -108,6 +112,7 @@ function Confidentialite() {
         items={[
           'Compte et historique : jusqu’à la suppression du compte (immédiate, depuis le menu du compte).',
           'Sessions : 30 jours, révocables à tout moment.',
+          'Code de connexion par e-mail : 10 minutes au plus, supprimé dès son utilisation.',
           'Compteurs de quotas : 2 jours.',
           'Données de facturation : durée légale de conservation des pièces comptables.',
         ]}

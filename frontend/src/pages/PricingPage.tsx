@@ -1,6 +1,7 @@
 import { Check, Crown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ApiError, fetchBilling, startCheckout, type Billing } from '../api/client'
+import { EmailLoginForm } from '../components/EmailLoginForm'
 import { GoogleSignInButton } from '../components/GoogleSignInButton'
 import { useAuth } from '../hooks/useAuth'
 import { legalHref } from '../lib/route'
@@ -82,10 +83,15 @@ export function PricingPage() {
       </button>
     )
   } else if (!auth.user) {
-    action = auth.enabled && auth.googleClientId ? (
-      <div className="space-y-2">
+    action = auth.enabled && (auth.googleClientId || auth.emailLogin) ? (
+      <div className="space-y-3">
         <p className="text-xs text-neutral-600">Connectez-vous pour vous abonner : l’abonnement est rattaché à votre compte.</p>
-        <GoogleSignInButton clientId={auth.googleClientId} onCredential={(c) => void auth.signIn(c)} />
+        {auth.googleClientId && <GoogleSignInButton clientId={auth.googleClientId} onCredential={(c) => void auth.signIn(c)} />}
+        {auth.emailLogin && (
+          <div className="rounded-xl bg-white p-3 text-neutral-900 [&_p]:text-neutral-500">
+            <EmailLoginForm />
+          </div>
+        )}
       </div>
     ) : (
       <p className="text-xs text-neutral-500">La connexion est momentanément indisponible.</p>

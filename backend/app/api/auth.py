@@ -15,6 +15,7 @@ from app.api.deps import enforce_read_rate_limit
 from app.core.identity import is_valid_token
 from app.core.security import get_client_ip
 from app.services.accounts import AccountError, AccountService, User
+from app.services.email_login import EmailLoginUnavailable, normalize_email
 from app.services.google_auth import AuthError, GoogleVerifier
 
 logger = logging.getLogger("facts.auth")
@@ -27,6 +28,25 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 class GoogleLogin(BaseModel):
     model_config = ConfigDict(extra="forbid")
     credential: Annotated[str, Field(min_length=20, max_length=4096)]
+    participant_token: str | None = None
+
+    @field_validator("participant_token")
+    @classmethod
+    def _token(cls, v: str | None) -> str | None:
+        if v is not None and not is_valid_token(v):
+            raise ValueError("jeton invalide")
+        return v
+
+
+class EmailRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: Annotated[str, Field(min_length=3, max_length=254)]
+
+
+class EmailVerify(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: Annotated[str, Field(min_length=3, max_length=254)]
+    code: Annotated[str, Field(min_length=6, max_length=6)]
     participant_token: str | None = None
 
     @field_validator("participant_token")
@@ -70,6 +90,8 @@ def _public(user: User) -> dict[str, str]:
 async def login_google(request: Request, body: GoogleLogin) -> dict:
     settings = request.app.state.settings
     service, verifier = _service(request), request.app.state.google
+    if verifier is None:
+        raise HTTPException(status_code=503, detail="La connexion Google est indisponible.")
     ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
     limiter = request.app.state.login_limiter
     if not limiter.allow(ip):  # avant toute vérification : le contrôle coûte du calcul et un appel réseau
@@ -83,6 +105,51 @@ async def login_google(request: Request, body: GoogleLogin) -> dict:
         raise HTTPException(status_code=401, detail=str(exc)) from None
     except AccountError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
+    return {"session_token": token, "user": _public(user)}
+
+
+def _email_login(request: Request):
+    service = getattr(request.app.state, "email_login", None)
+    if service is None:
+        raise HTTPException(status_code=503, detail="La connexion par e-mail est indisponible.")
+    return service
+
+
+def _login_ip_guard(request: Request) -> str:
+    settings = request.app.state.settings
+    ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
+    limiter = request.app.state.login_limiter
+    if not limiter.allow(ip):
+        raise HTTPException(
+            status_code=429, detail="Trop de tentatives. Réessayez plus tard.", headers={"Retry-After": str(limiter.retry_after(ip))}
+        )
+    return ip
+
+
+@router.post("/email/request", status_code=202)
+async def email_request(request: Request, body: EmailRequest) -> dict:
+    """Envoie un code. Réponse identique que l'adresse soit connue, nouvelle ou temporairement plafonnée."""
+    service = _email_login(request)
+    ip = _login_ip_guard(request)
+    email = normalize_email(body.email)
+    if email is None:
+        raise HTTPException(status_code=422, detail="Adresse e-mail invalide.")
+    try:
+        await service.request(email, ip)
+    except EmailLoginUnavailable:
+        raise HTTPException(status_code=503, detail="L'envoi du code est momentanément indisponible. Réessayez plus tard.") from None
+    return {"sent": True}
+
+
+@router.post("/email/verify")
+async def email_verify(request: Request, body: EmailVerify) -> dict:
+    service = _email_login(request)
+    _login_ip_guard(request)
+    email = normalize_email(body.email)
+    result = await service.verify(email, body.code, body.participant_token) if email else None
+    if result is None:
+        raise HTTPException(status_code=401, detail="Code invalide ou expiré.")
+    token, user = result
     return {"session_token": token, "user": _public(user)}
 
 

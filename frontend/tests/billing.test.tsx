@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { fetchBilling, startCheckout } from '../src/api/client'
@@ -109,6 +109,17 @@ describe('PricingPage', () => {
     expect(screen.getByTestId('google-button')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Passer à Pro' })).not.toBeInTheDocument()
     expect(screen.getByText('5 € / mois')).toBeInTheDocument()
+  })
+
+  it('e-mail activé : le formulaire e-mail apparaît ; sinon seulement Google', async () => {
+    auth.value = { ...ANON, requestCode: vi.fn(), signInWithEmail: vi.fn(), emailLogin: true }
+    await show()
+    expect(await screen.findByRole('form', { name: 'Connexion par e-mail' })).toBeInTheDocument()
+    cleanup()
+    auth.value = { ...ANON, emailLogin: false }
+    await show()
+    expect(await screen.findByTestId('google-button')).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Connexion par e-mail' })).not.toBeInTheDocument()
   })
 
   it('ouvert + connexion indisponible : le dit', async () => {

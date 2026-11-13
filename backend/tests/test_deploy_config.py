@@ -162,3 +162,10 @@ def test_payments_are_off_in_the_blueprint_and_their_secrets_stay_out_of_the_rep
     for secret in ("FACTS_LEMONSQUEEZY_WEBHOOK_SECRET", "FACTS_LEMONSQUEEZY_CHECKOUT_URL"):
         block = RENDER.split(f"key: {secret}", 1)[1].split("- key:", 1)[0]
         assert "sync: false" in block and "value:" not in block
+
+
+def test_email_login_secrets_stay_out_of_the_repo_and_are_off_by_default():
+    for key in ("FACTS_RESEND_API_KEY", "FACTS_EMAIL_FROM"):
+        block = RENDER.split(f"key: {key}", 1)[1].split("- key:", 1)[0]
+        assert "sync: false" in block and "value:" not in block
+    assert "re_" not in RENDER  # aucune clé Resend dans le dépôt
