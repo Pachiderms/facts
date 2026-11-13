@@ -25,11 +25,13 @@ export function buildHeaders(apiUrl) {
   const { http, ws } = apiOrigins(apiUrl)
   const csp = [
     "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self'",
+    // « Se connecter avec Google » (Google Identity Services) : uniquement ces chemins précis, jamais tout le domaine.
+    "script-src 'self' https://accounts.google.com/gsi/client",
+    "style-src 'self' https://accounts.google.com/gsi/style",
     "style-src-attr 'unsafe-inline'", // largeur de la jauge (style={{ width }}) ; aucun style de page inline
     "img-src 'self' data:",
-    `connect-src 'self' ${http} ${ws}`,
+    `connect-src 'self' ${http} ${ws} https://accounts.google.com/gsi/`,
+    'frame-src https://accounts.google.com/gsi/',
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

@@ -23,6 +23,10 @@ services:
       # Adresse PostgreSQL (Neon : variante « pooled »). Optionnelle : vide = salons en mémoire uniquement.
       - key: FACTS_DATABASE_URL
         sync: false
+      # Identifiant client Google (PUBLIC, pas un secret) : active « Se connecter avec Google ». Vide = pas de comptes.
+      # Les comptes exigent aussi FACTS_DATABASE_URL.
+      - key: FACTS_GOOGLE_CLIENT_ID
+        sync: false
       - key: FACTS_LLM_API_KEY
         sync: false
       - key: FACTS_TAVILY_API_KEY

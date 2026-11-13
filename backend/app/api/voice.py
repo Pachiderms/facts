@@ -38,9 +38,16 @@ async def _read_body(request: Request, max_bytes: int) -> bytes:
 
 
 @router.get("/features")
-async def features(request: Request) -> dict[str, bool]:
-    """Fonctions optionnelles disponibles : le front masque le micro si la voix est coupée."""
-    return {"voice": request.app.state.stt is not None}
+async def features(request: Request) -> dict:
+    """Fonctions optionnelles disponibles : le front masque le micro / la connexion si elles sont coupées.
+    `google_client_id` est PUBLIC (il figure déjà dans le bouton de connexion) : jamais un secret."""
+    app = request.app
+    accounts = app.state.accounts is not None
+    return {
+        "voice": app.state.stt is not None,
+        "accounts": accounts,
+        "google_client_id": app.state.settings.google_client_id.strip() if accounts else None,
+    }
 
 
 @router.post("/transcribe")

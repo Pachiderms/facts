@@ -50,9 +50,9 @@ def test_transcribes_and_returns_text():
 
 
 def test_features_reports_voice_flag():
-    assert make().get("/api/v1/features").json() == {"voice": True}
+    assert make().get("/api/v1/features").json() == {"voice": True, "accounts": False, "google_client_id": None}
     off = TestClient(create_app(Settings(_env_file=None)))
-    assert off.get("/api/v1/features").json() == {"voice": False}
+    assert off.get("/api/v1/features").json()["voice"] is False
 
 
 def test_disabled_without_provider_returns_503():

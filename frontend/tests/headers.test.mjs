@@ -58,3 +58,30 @@ describe('buildHeaders', () => {
     expect(evil).toContain("script-src 'self'")
   })
 })
+
+describe('CSP et connexion Google', () => {
+  const csp = () => {
+    const out = buildHeaders('https://facts-api-eu.onrender.com')
+    return Object.fromEntries(
+      out
+        .match(/Content-Security-Policy: (.*)/)[1]
+        .split('; ')
+        .map((d) => [d.split(' ')[0], d.split(' ').slice(1)]),
+    )
+  }
+
+  it('autorise Google Identity Services uniquement sur ses chemins précis', () => {
+    const c = csp()
+    expect(c['script-src']).toEqual(["'self'", 'https://accounts.google.com/gsi/client'])
+    expect(c['style-src']).toEqual(["'self'", 'https://accounts.google.com/gsi/style'])
+    expect(c['frame-src']).toEqual(['https://accounts.google.com/gsi/'])
+    expect(c['connect-src']).toContain('https://accounts.google.com/gsi/')
+  })
+
+  it('n’ouvre aucun joker : pas de unsafe-inline/eval dans les scripts, pas de domaine Google entier', () => {
+    const out = buildHeaders('https://facts-api-eu.onrender.com')
+    expect(csp()['script-src'].join(' ')).not.toMatch(/unsafe-inline|unsafe-eval|\*/)
+    expect(out).not.toMatch(/https:\/\/\*\.google|https:\/\/accounts\.google\.com[ ;]/)
+    expect(csp()['frame-ancestors']).toEqual(["'none'"])
+  })
+})

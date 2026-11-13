@@ -60,6 +60,18 @@ Inutile tant que rien n'est stocké en base (les salons restent en mémoire). À
 
 **Ne pas donner `/health/db` au pinger** : chaque appel réveille la base et consomme des heures de calcul. `/health` (pinger) ne la touche pas. Pour couper la base : vider `FACTS_DATABASE_URL` et redéployer.
 
+## Connexion avec Google (optionnelle, gratuite)
+
+Nécessite la base Neon (ci-dessus). Sans identifiant Google, le site fonctionne sans comptes.
+
+1. Console Google Cloud (console.cloud.google.com) : créer un projet.
+2. **Google Auth Platform** (ou *APIs & Services → OAuth consent screen*) : renseigner le nom de l'application, votre e-mail d'assistance, type d'utilisateurs **externe**. Penser à **publier l'application** (statut « en production ») : en mode test, seuls les comptes de test peuvent se connecter.
+3. **Clients** (ou *Credentials → Create credentials → OAuth client ID*) : type **Application Web**. Dans **Origines JavaScript autorisées**, ajouter l'adresse EXACTE du site (`https://xxx.workers.dev`, sans slash final) et, pour tester en local, `http://localhost:5173`. Aucune « URI de redirection » n'est nécessaire.
+4. Copier l'**ID client** (`…apps.googleusercontent.com`). C'est une valeur **publique**, pas un secret. Ne cherchez pas de « secret client » : il n'est pas utilisé.
+5. Dans Render : `FACTS_GOOGLE_CLIENT_ID` = cet ID, puis redéployer. Le bouton apparaît sur le site (rechargez la page). Vérifier : `https://<votre-api>/api/v1/features` contient `"accounts": true`.
+
+Les changements d'origines côté Google peuvent mettre de 5 minutes à quelques heures à s'appliquer. Erreur `origin_mismatch` : l'adresse saisie ne correspond pas exactement à celle du site. Si Google refuse l'adresse `workers.dev` comme origine, un nom de domaine à vous (environ 10 €/an) réglera le problème.
+
 ## Garder l'API éveillée (optionnel, gratuit)
 
 Render met l'API en veille après 15 minutes sans trafic. Un pinger externe l'évite :
