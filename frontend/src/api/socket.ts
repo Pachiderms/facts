@@ -1,4 +1,5 @@
 import { getParticipantToken } from '../lib/identity'
+import { getSession } from '../lib/session'
 import { wsBase } from './client'
 import type { ServerEvent } from './types'
 
@@ -76,12 +77,14 @@ export class RoomSocket {
     ws.onopen = () => {
       // Premier message obligatoire : identité et, pour un salon privé, code d'accès.
       const { code, spectate } = this.options
+      const session = getSession()
       ws.send(
         JSON.stringify({
           type: 'hello',
           token: this.options.token ?? getParticipantToken(),
           ...(code ? { code } : {}),
           ...(spectate ? { spectate: true } : {}),
+          ...(session ? { session } : {}),
         }),
       )
       this.attempt = 0

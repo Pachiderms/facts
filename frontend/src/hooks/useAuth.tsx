@@ -11,6 +11,7 @@ import {
   type AccountUser,
 } from '../api/client'
 import { clearSession, getSession, setSession } from '../lib/session'
+import { useHistorySync } from './useHistorySync'
 
 export interface AuthState {
   /** Les comptes sont proposés (serveur configuré). Sinon l'interface n'affiche rien. */
@@ -53,6 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AccountUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  useHistorySync(user?.id ?? null)
 
   useEffect(() => {
     let alive = true

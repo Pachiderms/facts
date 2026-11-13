@@ -173,8 +173,33 @@ class ModerationLedger:
         self._ban_seconds, self._strike_ttl, self._max, self._clock = ban_seconds, strike_ttl_seconds, max_entries, clock
         self._strikes: OrderedDict[str, tuple[int, float]] = OrderedDict()  # pid -> (nombre, dernier)
         self._bans: OrderedDict[str, float] = OrderedDict()  # pid -> fin de l'exclusion
+        self._alias: OrderedDict[str, str] = OrderedDict()  # ancienne identité (jeton anonyme) -> identité de compte
+
+    def link(self, identity: str, aliases: tuple[str, ...] | list[str]) -> None:
+        """Rattache des identités anonymes à une identité de compte : sanctions fusionnées (le pire l'emporte).
+
+        Se déconnecter ou changer d'appareil ne remet donc pas les compteurs à zéro. Idempotent.
+        """
+        for alias in aliases:
+            if alias == identity:
+                continue
+            old = self._alias.get(alias)
+            if old is not None and old != identity:
+                continue  # déjà rattaché à un autre compte : le premier compte garde l'identité
+            self._alias[alias] = identity
+            self._alias.move_to_end(alias)
+            self._bound(self._alias)
+            if (item := self._strikes.pop(alias, None)) is not None:
+                mine = self._strikes.get(identity)
+                self._strikes[identity] = item if mine is None or item[0] > mine[0] else mine
+            if (until := self._bans.pop(alias, None)) is not None:
+                self._bans[identity] = max(until, self._bans.get(identity, 0.0))
+
+    def resolve(self, pid: str) -> str:
+        return self._alias.get(pid, pid)
 
     def ban_remaining(self, pid: str) -> int:
+        pid = self.resolve(pid)
         until = self._bans.get(pid)
         if until is None:
             return 0
@@ -185,12 +210,14 @@ class ModerationLedger:
         return int(left) + 1
 
     def strikes(self, pid: str) -> int:
+        pid = self.resolve(pid)
         item = self._strikes.get(pid)
         if item is None or self._clock() - item[1] >= self._strike_ttl:
             return 0
         return item[0]
 
     def add_strike(self, pid: str) -> Sanction:
+        pid = self.resolve(pid)
         remaining = self.ban_remaining(pid)
         if remaining:
             return Sanction("banned", MAX_STRIKES, remaining)

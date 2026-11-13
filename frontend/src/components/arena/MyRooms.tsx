@@ -1,7 +1,7 @@
 import { Eye, Lock, Pin, PinOff, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { roomsStatus } from '../../api/client'
-import { loadHistory, removeEntry, togglePin, type HistoryEntry } from '../../lib/history'
+import { loadHistory, removeEntry, subscribeHistory, togglePin, type HistoryEntry } from '../../lib/history'
 import { timeAgo } from '../../lib/presentation'
 import { roomHref } from '../../lib/route'
 import { DeleteRoomButton } from './DeleteRoomButton'
@@ -11,6 +11,7 @@ export function MyRooms() {
   const [entries, setEntries] = useState<HistoryEntry[]>(() => loadHistory())
   // `null` tant que le serveur n'a pas répondu : on n'affiche alors aucun « Expiré » (pas de faux négatif).
   const [existing, setExisting] = useState<Set<string> | null>(null)
+  useEffect(() => subscribeHistory((next) => setEntries(next)), []) // synchronisation avec le compte
   const idsKey = entries.map((e) => e.id).join(',')
 
   useEffect(() => {

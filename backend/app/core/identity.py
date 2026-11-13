@@ -7,6 +7,7 @@ compte : un visiteur qui vide son navigateur change d'identité (limite assumée
 
 import hashlib
 import re
+from uuid import UUID
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{22,64}")
 
@@ -18,3 +19,8 @@ def is_valid_token(token: object) -> bool:
 def participant_id(token: str) -> str:
     """Empreinte stable et non réversible du jeton (16 hex = 64 bits : largement assez ici)."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:16]
+
+
+def account_identity(user_id: UUID) -> str:
+    """Identité d'un compte : « u: » + 16 hex. Le préfixe (« : » absent des empreintes anonymes) évite toute collision."""
+    return "u:" + user_id.hex[:16]

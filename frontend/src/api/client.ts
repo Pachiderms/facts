@@ -1,4 +1,5 @@
 import { getParticipantToken } from '../lib/identity'
+import { getSession } from '../lib/session'
 import { CREATABLE_THEMES } from '../lib/presentation'
 import { ROOM_TITLE_MAX, ROOM_TITLE_MIN, type CheckResponse, type CreatedRoom, type CreateRoomInput, type RoomLookup, type RoomSummary, type Verdict } from './types'
 
@@ -177,7 +178,7 @@ export async function createRoom(input: CreateRoomInput, signal?: AbortSignal): 
     '/api/v1/rooms',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...optionalAuth() },
       body: JSON.stringify({ ...input, participant_token: getParticipantToken() }),
       signal,
     },
@@ -240,7 +241,7 @@ export async function deleteRoom(id: string, signal?: AbortSignal): Promise<void
     `/api/v1/rooms/${encodeURIComponent(id)}/delete`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...optionalAuth() },
       body: JSON.stringify({ participant_token: getParticipantToken() }),
       signal,
     },
@@ -320,6 +321,12 @@ export interface AccountUser {
 
 const authHeader = (token: string) => ({ Authorization: `Bearer ${token}` })
 
+/** Session éventuelle : le serveur rattache alors le salon (création, suppression) au compte. */
+function optionalAuth(): Record<string, string> {
+  const token = getSession()
+  return token ? authHeader(token) : {}
+}
+
 const isUser = (v: unknown): v is AccountUser =>
   isRecord(v) && typeof v.id === 'string' && typeof v.email === 'string' && typeof v.created_at === 'string'
 
@@ -375,4 +382,45 @@ export async function exportAccount(token: string): Promise<Blob> {
   const response = await request('/api/v1/auth/export', { headers: authHeader(token) }, 20_000)
   if (!response.ok) throw await toApiError(response)
   return new Blob([await response.text()], { type: 'application/json' })
+}
+
+/** Entrée de l'historique côté serveur (jamais de code d'accès). */
+export interface RemoteHistoryEntry {
+  id: string
+  title: string
+  visibility: 'public' | 'private'
+  owner: boolean
+  pinned: boolean
+  lastVisit: number
+}
+
+function parseRemoteHistory(data: unknown): RemoteHistoryEntry[] {
+  if (!isRecord(data) || !Array.isArray(data.entries)) throw BAD_RESPONSE()
+  return data.entries.flatMap((e: unknown) =>
+    isRecord(e) &&
+    typeof e.id === 'string' &&
+    typeof e.title === 'string' &&
+    isVisibility(e.visibility) &&
+    typeof e.owner === 'boolean' &&
+    typeof e.pinned === 'boolean' &&
+    typeof e.lastVisit === 'number'
+      ? [{ id: e.id, title: e.title, visibility: e.visibility, owner: e.owner, pinned: e.pinned, lastVisit: e.lastVisit }]
+      : [],
+  )
+}
+
+export async function fetchHistory(token: string, signal?: AbortSignal): Promise<RemoteHistoryEntry[]> {
+  const response = await request('/api/v1/me/history', { headers: authHeader(token), signal }, 20_000)
+  if (!response.ok) throw await toApiError(response)
+  return parseRemoteHistory(await response.json().catch(() => null))
+}
+
+export async function pushHistory(token: string, entries: RemoteHistoryEntry[], signal?: AbortSignal): Promise<RemoteHistoryEntry[]> {
+  const response = await request(
+    '/api/v1/me/history',
+    { method: 'POST', headers: { ...authHeader(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ entries }), signal },
+    20_000,
+  )
+  if (!response.ok) throw await toApiError(response)
+  return parseRemoteHistory(await response.json().catch(() => null))
 }

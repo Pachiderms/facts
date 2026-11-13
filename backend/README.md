@@ -241,3 +241,14 @@ Facultatifs : sans compte, tout fonctionne comme avant (jeton anonyme du navigat
 - **Plafonds** : 10 tentatives de connexion par IP et par 10 min, vérifiées **avant** tout contrôle de jeton.
 - Un même e-mail avec un autre identifiant Google ne reprend **jamais** un compte existant (409).
 - Tests : `test_google_auth.py` (jetons forgés, expirés, mauvaise audience, confusion d'algorithme, rotation des clés…) sans base ; `test_accounts_api.py` sur **PostgreSQL réel** (sessions, révocation, plafonds, export, suppression en cascade).
+
+## Identité de compte dans les salons (PR J)
+
+Un compte reste **facultatif** : sans compte, l'identité est l'empreinte du jeton du navigateur (inchangé). Connecté, la personne a une identité de compte `u:<16 hex>` et son empreinte anonyme devient un **alias**.
+
+- **Résolution** (`app/api/identity.py`) : WebSocket → champ `session` du `hello` (les navigateurs ne peuvent pas poser d'en-tête) ; création/suppression de salon → `Authorization: Bearer`. Session absente, invalide ou base indisponible : repli silencieux sur l'identité anonyme, jamais d'erreur côté salon.
+- **Salon** (`Room.canonical`) : la première identité connue sert de référence, les autres y sont rattachées. Siège, numéro, exclusion du salon et propriété survivent à une connexion, une déconnexion ou un autre appareil. Table bornée.
+- **Sanctions** (`ModerationLedger.link`) : avertissements et exclusions sont fusionnés sur le compte (le pire l'emporte) ; un navigateur déjà rattaché reste sanctionné même déconnecté, et un compte exclu l'est sur tout nouvel appareil. Un navigateur neuf jamais connecté n'est pas relié : limite assumée. Le premier compte garde l'alias. Les sanctions restent en mémoire (non persistées).
+- **Historique synchronisé** : `GET` / `POST /api/v1/me/history` (POST remplace la liste, le CORS du projet n'autorise que GET et POST), session requise, 20 entrées max, identifiant/titre/visibilité validés et nettoyés. **Jamais de code d'accès** côté serveur. Table `user_rooms` (migration 0003), supprimée avec le compte (cascade) et incluse dans l'export RGPD.
+
+Tests : `test_account_identity.py` (sans base) et `test_account_rooms_api.py` (vraie base), avec contrôle par mutations.

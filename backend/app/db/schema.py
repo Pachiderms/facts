@@ -2,7 +2,8 @@
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, MetaData, String, Table, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, MetaData, String, Table, Uuid, func
+from sqlalchemy.sql import expression
 
 # Noms de contraintes prévisibles : les migrations peuvent les retrouver et les supprimer.
 metadata = MetaData(
@@ -59,4 +60,19 @@ user_participants = Table(
     Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
     Column("linked_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Index("ix_user_participants_user_id", "user_id"),
+)
+
+# Historique « Mes salons » synchronisé (20 entrées max par compte). Jamais de code d'accès : un salon privé
+# se rouvre avec le code gardé sur l'appareil, le serveur ne stocke que ce qu'il faut pour afficher la liste.
+user_rooms = Table(
+    "user_rooms",
+    metadata,
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("room_id", String(64), primary_key=True),
+    Column("title", String(120), nullable=False),
+    Column("visibility", String(8), nullable=False),
+    Column("owner", Boolean, nullable=False, server_default=expression.false()),
+    Column("pinned", Boolean, nullable=False, server_default=expression.false()),
+    Column("last_visit", BigInteger, nullable=False),
+    CheckConstraint("visibility IN ('public', 'private')", name="visibility"),
 )

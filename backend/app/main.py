@@ -15,6 +15,7 @@ from app.adapters.llm import OpenAICompatibleLLM
 from app.adapters.stt import GroqWhisper, SpeechToText
 from app.adapters.search_chain import FallbackSearch, build_search_chain
 from app.api import auth as auth_api
+from app.api import history as history_api
 from app.api import check as check_api
 from app.api.deps import enforce_read_rate_limit
 from app.api import rooms as rooms_api
@@ -24,6 +25,7 @@ from app.db.engine import Database
 from app.core.config import Settings, get_settings
 from app.core.security import DailyBudget, SlidingWindowRateLimiter
 from app.services.accounts import AccountService
+from app.services.history import HistoryService
 from app.services.factcheck import FactCheckService
 from app.services.google_auth import GoogleVerifier
 from app.services.claim_triage import ClaimExtractor
@@ -114,6 +116,8 @@ def create_app(
             app.state.accounts = AccountService(
                 app.state.db, session_ttl_days=settings.session_ttl_days, max_sessions=settings.max_sessions_per_user
             )
+        if app.state.accounts is not None and app.state.db is not None and app.state.history is None:
+            app.state.history = HistoryService(app.state.db)
         stt_owned = None
         if app.state.stt is None and settings.voice_available:
             app.state.stt = stt_owned = GroqWhisper(
@@ -164,6 +168,7 @@ def create_app(
     app.state.accounts = None
     if db is not None and google is not None and settings.google_client_id.strip():
         app.state.accounts = AccountService(db, session_ttl_days=settings.session_ttl_days, max_sessions=settings.max_sessions_per_user)
+    app.state.history = HistoryService(db) if app.state.accounts is not None and db is not None else None
     app.state.login_limiter = SlidingWindowRateLimiter(settings.login_attempts_per_window, settings.login_window_seconds)
     app.state.stt_minute_limiter = SlidingWindowRateLimiter(settings.stt_per_minute, 60)
     app.state.stt_person_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_person, 86_400)
@@ -216,6 +221,7 @@ def create_app(
     app.include_router(rooms_api.router)
     app.include_router(voice_api.router)
     app.include_router(auth_api.router)
+    app.include_router(history_api.router)
     return app
 
 
