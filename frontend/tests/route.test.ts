@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseHash, roomHref } from '../src/lib/route'
+import { parseHash, parseJoinInput, roomHref } from '../src/lib/route'
 
 describe('parseHash', () => {
   it.each([
@@ -60,4 +60,29 @@ describe('mode spectateur (?watch=1)', () => {
     expect(roomHref('abcd2345', true)).toBe('#/arena/abcd2345?watch=1')
     expect(roomHref('abcd2345')).toBe('#/arena/abcd2345')
   })
+})
+
+describe('parseJoinInput (Rejoindre un salon)', () => {
+  it.each([
+    ['mon-salon', '', { id: 'mon-salon' }],
+    ['  Mon-Salon  ', '', { id: 'mon-salon' }],
+    ['mon-salon', 'ab12', { id: 'mon-salon', code: 'AB12' }],
+    ['https://cafaitdebat.fr/#/arena/mon-salon', '', { id: 'mon-salon' }],
+    ['https://cafaitdebat.fr/#/arena/mon-salon?code=Zx9', '', { id: 'mon-salon', code: 'Zx9' }],
+    ['https://cafaitdebat.fr/#/arena/mon-salon?code=Zx9', 'k7', { id: 'mon-salon', code: 'K7' }], // le champ code prime
+  ])('%j + %j', (raw, code, expected) => expect(parseJoinInput(raw, code)).toEqual(expected))
+
+  it.each([
+    ['', ''],
+    ['   ', ''],
+    ['mon salon', ''], // espace
+    ['MON_SALON', ''], // underscore
+    ['../etc/passwd', ''],
+    ['<script>alert(1)</script>', ''],
+    ['a'.repeat(65), ''],
+    ['mon-salon', 'pas valide!'], // code avec caractères interdits
+    ['mon-salon', 'a'.repeat(17)],
+    ['https://exemple.fr/#/autre/chose', ''], // lien qui n'est pas un salon
+    ['https://exemple.fr/#/arena', ''], // liste, pas un salon
+  ])('refuse %j (code %j)', (raw, code) => expect(parseJoinInput(raw, code)).toBeNull())
 })
