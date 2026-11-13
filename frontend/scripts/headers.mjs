@@ -20,6 +20,8 @@ export function apiOrigins(apiUrl) {
   return { http: url.origin, ws: `${wsProtocol}//${url.host}` }
 }
 
+export const GSI_STYLE_HASH = 'sha256-XK7RzFyLTTNIa7i/q0MboN4v9nTZbxnn4RyrujogKrg='
+
 /** @param {string} apiUrl */
 export function buildHeaders(apiUrl) {
   const { http, ws } = apiOrigins(apiUrl)
@@ -27,7 +29,9 @@ export function buildHeaders(apiUrl) {
     "default-src 'self'",
     // « Se connecter avec Google » (Google Identity Services) : uniquement ces chemins précis, jamais tout le domaine.
     "script-src 'self' https://accounts.google.com/gsi/client",
-    "style-src 'self' https://accounts.google.com/gsi/style",
+    // + l'empreinte de l'unique balise <style> que le script de Google injecte (signalée par le navigateur). Une EMPREINTE,
+    // pas 'unsafe-inline' : seul ce contenu exact est autorisé. Si Google la modifie, le bouton reste utilisable (style de détail).
+    `style-src 'self' https://accounts.google.com/gsi/style '${GSI_STYLE_HASH}'`,
     "style-src-attr 'unsafe-inline'", // largeur de la jauge (style={{ width }}) ; aucun style de page inline
     "img-src 'self' data:",
     `connect-src 'self' ${http} ${ws} https://accounts.google.com/gsi/`,

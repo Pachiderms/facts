@@ -293,3 +293,76 @@ async def test_rate_limit_is_unavailable_and_never_retried():
     llm = ScriptedLLM(LLMRateLimitError("429"), {"claim": FACT})  # la 2e réponse ne doit jamais être consommée
     assert (await ClaimExtractor(llm).triage(FACT)).outcome == "unavailable"
     assert len(llm.calls) == 1
+
+
+# ---------- faits combinés (régression : seul le premier fait chiffré était vérifié) ----------
+from app.services.claim_triage import widen_claim  # noqa: E402
+
+USER_MSG = (
+    "Les vehicules thermiques representent la majorité des vehicules actuellement. avec 15% des francais vivant sous le seuil "
+    "de pauvreté il sera compliqué pour tous ces gens d echanger de voiture en moins de 10 ans"
+)
+FIRST = "Les vehicules thermiques representent la majorité des vehicules actuellement."
+
+
+def test_widen_covers_the_figure_the_extract_missed():
+    assert widen_claim(USER_MSG, FIRST) == USER_MSG
+
+
+def test_widen_leaves_a_complete_extract_alone():
+    assert widen_claim(USER_MSG, USER_MSG) == USER_MSG
+    one = "Le chômage est passé sous les 8 % en 2023. Mais personne ne s'en réjouit vraiment."
+    assert widen_claim(one, "Le chômage est passé sous les 8 % en 2023.") == "Le chômage est passé sous les 8 % en 2023."
+
+
+def test_widen_includes_only_the_sentences_with_figures():
+    text = "Le SMIC a augmenté de 12 % depuis 2021. Il fait beau. Aussi, l'inflation cumulée est de 15 %."
+    assert widen_claim(text, "Le SMIC a augmenté de 12 % depuis 2021.") == text  # plage continue entre les deux chiffres
+
+
+def test_widen_ignores_figures_inside_opinion_sentences():
+    text = "L'Espagne a augmenté son SMIC de 47 % en 5 ans. Personnellement, je trouve que 35 heures, c'est trop peu."
+    claim = "L'Espagne a augmenté son SMIC de 47 % en 5 ans."
+    assert widen_claim(text, claim) == claim
+
+
+def test_widen_does_not_split_on_decimals():
+    text = "Le déficit était de 4.9 % du PIB. La dette atteint 3 000 milliards d'euros."
+    assert widen_claim(text, "Le déficit était de 4.9 % du PIB.") == text
+
+
+def test_widen_falls_back_when_too_long_or_not_found():
+    long_tail = "La dette atteint 3 000 milliards d'euros " + "x" * 600 + "."
+    assert widen_claim("Le chômage est de 8 %. " + long_tail, "Le chômage est de 8 %.") == "Le chômage est de 8 %."
+    assert widen_claim("Texte sans rapport.", "Extrait introuvable 5 %") == "Extrait introuvable 5 %"
+
+
+async def test_triage_widens_a_first_fact_only_answer_to_the_whole_argument():
+    inner = Recording()
+    checker = TriagingMessageChecker(inner, ClaimExtractor(ScriptedLLM({"claim": FIRST})))
+    await checker.check(USER_MSG)
+    assert inner.calls == [USER_MSG]  # les DEUX faits partent en vérification, pas seulement le premier
+
+
+async def test_widened_claim_is_still_a_literal_excerpt():
+    extractor = ClaimExtractor(ScriptedLLM({"claim": FIRST}))
+    result = await extractor.triage(USER_MSG)
+    assert result.outcome == "claim" and result.claim in USER_MSG
+
+
+def test_prompts_ask_for_the_combination_of_facts():
+    from app.services.prompts import ANALYSIS_SYSTEM_PROMPT, QUERY_SYSTEM_PROMPT
+
+    assert "PLUSIEURS faits" in SYSTEM_PROMPT and "TOUS" in SYSTEM_PROMPT
+    assert "CHAQUE fait chiffré" in ANALYSIS_SYSTEM_PROMPT and "conclusion" in ANALYSIS_SYSTEM_PROMPT
+    assert "une requête par fait" in QUERY_SYSTEM_PROMPT
+
+
+def test_widen_does_not_cut_a_decimal_figure_in_the_added_sentence():
+    text = "La dette atteint 3 000 milliards d'euros. Le déficit était de 4.9 % du PIB."
+    assert widen_claim(text, "La dette atteint 3 000 milliards d'euros.") == text
+
+
+def test_widen_also_reaches_backwards():
+    text = "Il y a 15 % de pauvres. Les véhicules thermiques sont majoritaires."
+    assert widen_claim(text, "Les véhicules thermiques sont majoritaires.") == text

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apiOrigins, buildHeaders } from '../scripts/headers.mjs'
+import { GSI_STYLE_HASH, apiOrigins, buildHeaders } from '../scripts/headers.mjs'
 
 describe('apiOrigins', () => {
   it('dérive l’origine HTTP et WebSocket (https -> wss)', () => {
@@ -73,7 +73,8 @@ describe('CSP et connexion Google', () => {
   it('autorise Google Identity Services uniquement sur ses chemins précis', () => {
     const c = csp()
     expect(c['script-src']).toEqual(["'self'", 'https://accounts.google.com/gsi/client'])
-    expect(c['style-src']).toEqual(["'self'", 'https://accounts.google.com/gsi/style'])
+    expect(c['style-src']).toEqual(["'self'", 'https://accounts.google.com/gsi/style', `'${GSI_STYLE_HASH}'`])
+    expect(c['style-src']).not.toContain("'unsafe-inline'") // une empreinte précise, jamais « tout le inline »
     expect(c['frame-src']).toEqual(['https://accounts.google.com/gsi/'])
     expect(c['connect-src']).toContain('https://accounts.google.com/gsi/')
   })

@@ -7,10 +7,10 @@ from pydantic import BaseModel
 
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
 from app.core.text import fit_sentences
-from app.services.claim_triage import ClaimExtractor, is_triage_candidate
+from app.services.claim_triage import FIGURE_RE, OPINION_RE, ClaimExtractor, is_triage_candidate
 from app.services.factcheck import FactCheckService
 
-NOTE_MAX_CHARS = 300
+NOTE_MAX_CHARS = 420  # un message à plusieurs chiffres demande une note qui les couvre tous
 
 BadgeType = Literal["green", "amber", "red", "gray"]
 
@@ -28,17 +28,8 @@ _CHECKABLE_RE = re.compile(
 )
 
 
-# Un chiffre ou une quantité, hors simples références (« selon », « étude »…).
-_FIGURE_RE = re.compile(
-    r"\d|%|\b(?:milliards?|millions?|milliers?|dizaines?|centaines?|pourcent\w*|moiti[ée]|tiers|quarts?)\b"
-    r"|\bfois\s+(?:plus|moins)\b|\b(?:doubl|tripl)\w*",
-    re.IGNORECASE,
-)
-# Position personnelle : le chiffre n'y est qu'un jugement (« 35 heures, c'est trop peu, c'est mon avis »).
-_OPINION_RE = re.compile(
-    r"\b(?:je\s+(?:trouve|pense|crois|estime|considère|préfère|suis\s+(?:pour|contre|favorable|opposé))|selon\s+moi|à\s+mon\s+avis|mon\s+avis|personnellement)\b",
-    re.IGNORECASE,
-)
+# FIGURE_RE et OPINION_RE vivent dans claim_triage (partagés avec l'élargissement des extraits).
+_FIGURE_RE, _OPINION_RE = FIGURE_RE, OPINION_RE
 
 
 def is_quantified_assertion(text: str) -> bool:
