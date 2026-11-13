@@ -16,13 +16,13 @@ export function Header({ page, onNavigate }: { page: PageId; onNavigate: (page: 
         <div className="flex items-center space-x-3">
           <div
             aria-hidden="true"
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-neutral-900 font-mono text-xl font-black text-white shadow-md"
+            className="flex h-9 min-w-9 items-center justify-center rounded-lg bg-neutral-900 px-1.5 font-mono text-[13px] font-black tracking-tight text-white shadow-md"
           >
-            F
+            CFD
           </div>
           <div className="flex flex-col leading-tight">
             <span className="hidden font-mono text-xl font-extrabold tracking-tight text-neutral-900 sm:block">
-              Facts<span className="text-neutral-400">.</span>
+              CaFaitDebat<span className="text-neutral-400">.</span>
             </span>
             <span className="hidden text-[10px] font-medium uppercase tracking-wider text-neutral-500 sm:block">
               Vérification de faits &amp; arène neutre
@@ -70,7 +70,7 @@ export function Footer() {
     <footer className="mt-16 border-t border-neutral-200 bg-white py-6 text-xs text-neutral-500">
       <div className="mx-auto max-w-7xl px-4">
         <p>
-          <span className="font-bold text-neutral-900">Facts.</span> Vérification assistée par IA. Les verdicts peuvent comporter des
+          <span className="font-bold text-neutral-900">CaFaitDebat.</span> Vérification assistée par IA. Les verdicts peuvent comporter des
           erreurs : consultez toujours les sources.
         </p>
       </div>

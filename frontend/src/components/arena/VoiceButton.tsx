@@ -85,7 +85,7 @@ export function VoiceButton({ disabled = false, onText }: Props) {
       {asking && (
         <div role="dialog" aria-label="Consentement à la saisie vocale" className="space-y-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700">
           <p>
-            Votre voix est envoyée à Groq pour être transcrite en texte. L’enregistrement n’est pas conservé par Facts ; le texte vous est
+            Votre voix est envoyée à Groq pour être transcrite en texte. L’enregistrement n’est pas conservé par CaFaitDebat ; le texte vous est
             proposé pour relecture avant tout envoi.
           </p>
           <div className="flex gap-2">
