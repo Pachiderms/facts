@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { checkAssertion, fetchUsage } from '../src/api/client'
 import { UsageNote } from '../src/components/check/UsageNote'
+import { getParticipantToken } from '../src/lib/identity'
 import { clearSession, setSession } from '../src/lib/session'
 
 const TOKEN = 'T'.repeat(43)
@@ -30,6 +31,16 @@ describe('fetchUsage', () => {
     setSession(TOKEN)
     await fetchUsage()
     expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: `Bearer ${TOKEN}` })
+  })
+
+  it('envoie le jeton du navigateur, connecté ou non : le quota suit la personne', async () => {
+    fetchMock.mockImplementation(async (input) => (String(input).endsWith('/usage') ? json(usage()) : json({})))
+    const token = getParticipantToken()
+    expect(token).toMatch(/^[A-Za-z0-9_-]{22,64}$/)
+    await fetchUsage()
+    setSession(TOKEN)
+    await fetchUsage()
+    for (const call of fetchMock.mock.calls) expect((call[1] as RequestInit).headers).toMatchObject({ 'X-Participant-Token': token })
   })
 
   it('accepte le plan Pro', async () => {
@@ -81,5 +92,19 @@ describe('UsageNote', () => {
     const { container } = render(<UsageNote refreshKey={0} />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     expect(container.textContent).toBe('')
+  })
+})
+
+describe('checkAssertion : suivi du quota par navigateur', () => {
+  it('envoie le jeton du navigateur avec la session, et garde le même d’un appel à l’autre', async () => {
+    fetchMock.mockImplementation(async () => json({}, 500))
+    await checkAssertion('Le SMIC a augmenté.', true).catch(() => undefined)
+    setSession(TOKEN)
+    await checkAssertion('Le SMIC a augmenté.', true).catch(() => undefined)
+    const [first, second] = fetchMock.mock.calls.map((c) => (c[1] as RequestInit).headers as Record<string, string>)
+    expect(first).not.toHaveProperty('Authorization')
+    expect(second).toMatchObject({ Authorization: `Bearer ${TOKEN}` })
+    expect(first!['X-Participant-Token']).toBe(second!['X-Participant-Token'])
+    expect(first!['X-Participant-Token']).toBe(getParticipantToken())
   })
 })

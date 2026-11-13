@@ -113,7 +113,7 @@ export async function checkAssertion(
     '/api/v1/check',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...optionalAuth() }, // compte : quota par compte
+      headers: { 'Content-Type': 'application/json', ...quotaHeaders() }, // compte : quota par compte, suivi par navigateur
       body: JSON.stringify({ assertion, institutional_filter: institutionalFilter }),
       signal,
     },
@@ -327,6 +327,11 @@ function optionalAuth(): Record<string, string> {
   return token ? authHeader(token) : {}
 }
 
+/** Session éventuelle + jeton du navigateur : le quota suit la personne entre anonyme et compte. */
+function quotaHeaders(): Record<string, string> {
+  return { ...optionalAuth(), 'X-Participant-Token': getParticipantToken() }
+}
+
 const isUser = (v: unknown): v is AccountUser =>
   isRecord(v) && typeof v.id === 'string' && typeof v.email === 'string' && typeof v.created_at === 'string'
 
@@ -435,7 +440,7 @@ export interface Usage {
 }
 
 export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
-  const response = await request('/api/v1/usage', { headers: optionalAuth(), signal }, 15_000)
+  const response = await request('/api/v1/usage', { headers: quotaHeaders(), signal }, 15_000)
   if (!response.ok) throw await toApiError(response)
   const d: unknown = await response.json().catch(() => null)
   const c = isRecord(d) && isRecord(d.checks) ? d.checks : null

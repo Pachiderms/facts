@@ -66,7 +66,8 @@ function Confidentialite() {
           <>
             <strong>Sans compte</strong> : un identifiant aléatoire stocké dans votre navigateur (pour votre place dans un salon) et une
             empreinte de votre adresse IP, salée et non réversible, servant uniquement aux plafonds quotidiens. Votre adresse IP n’est pas
-            conservée en clair.
+            conservée en clair. Une empreinte salée de l’identifiant du navigateur compte aussi vos utilisations du jour, connecté ou non, pour que
+            votre quota ne reparte pas à zéro quand vous vous connectez ou vous déconnectez ; ces compteurs sont purgés après un jour.
           </>,
           <>
             <strong>Avec un compte Google</strong> : votre adresse e-mail et l’identifiant Google associé (ni nom, ni photo), des sessions
