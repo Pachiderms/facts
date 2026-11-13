@@ -3,6 +3,8 @@ import { warmUp } from './api/client'
 import { Footer, Header, Page, type PageId } from './components/Layout'
 import { ArenaPage } from './pages/ArenaPage'
 import { CheckPage } from './pages/CheckPage'
+import { LegalPage } from './pages/LegalPage'
+import { PricingPage } from './pages/PricingPage'
 import { RoomPage } from './pages/RoomPage'
 import { parseHash, type Route } from './lib/route'
 
@@ -20,7 +22,7 @@ export default function App() {
     window.location.hash = next === 'arena' ? '#/arena' : '#/check'
   }, [])
 
-  const page: PageId = route.name === 'check' ? 'check' : 'arena'
+  const page: PageId | null = route.name === 'check' ? 'check' : route.name === 'pricing' || route.name === 'legal' ? null : 'arena'
 
   return (
     <div className="min-h-screen bg-neutral-100/70 font-sans text-neutral-900 selection:bg-neutral-900 selection:text-white">
@@ -28,6 +30,8 @@ export default function App() {
       <Page>
         {route.name === 'check' && <CheckPage />}
         {route.name === 'arena' && <ArenaPage />}
+        {route.name === 'pricing' && <PricingPage />}
+        {route.name === 'legal' && <LegalPage doc={route.doc} />}
         {route.name === 'room' && <RoomPage key={route.id} id={route.id} inviteCode={route.code} watch={route.watch === true} />}
       </Page>
       <Footer />

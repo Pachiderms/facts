@@ -14,7 +14,7 @@ GLOBAL_KEY = "all"
 
 @dataclass(frozen=True)
 class Who:
-    plan: str  # "anonymous" | "free"
+    plan: str  # "anonymous" | "free" | "pro"
     key: str  # clé principale : empreinte de l'IP (anonyme) ou du compte
     ip_key: str  # empreinte de l'IP : filet commun contre la multiplication de comptes
 
@@ -27,21 +27,21 @@ class QuotaPolicy:
         k = make_key(self._salt, "ip:" + ip)
         return Who("anonymous", k, k)
 
-    def account(self, account_id: str, ip: str) -> Who:
-        return Who("free", make_key(self._salt, "acct:" + account_id), make_key(self._salt, "ip:" + ip))
+    def account(self, account_id: str, ip: str, plan: str = "free") -> Who:
+        return Who("pro" if plan == "pro" else "free", make_key(self._salt, "acct:" + account_id), make_key(self._salt, "ip:" + ip))
 
     # ---------- limites ----------
     def check_limit(self, who: Who) -> int:
-        return self._s.account_daily_check_limit if who.plan == "free" else self._s.daily_check_limit
+        return {"pro": self._s.pro_daily_check_limit, "free": self._s.account_daily_check_limit}.get(who.plan, self._s.daily_check_limit)
 
     def debate_limit(self, who: Who) -> int:
-        return self._s.account_debate_daily_checks if who.plan == "free" else self._s.debate_daily_checks
+        return {"pro": self._s.pro_debate_daily_checks, "free": self._s.account_debate_daily_checks}.get(who.plan, self._s.debate_daily_checks)
 
     # ---------- consommation ----------
     async def consume_check(self, who: Who) -> bool:
         if who.plan == "anonymous":
             return await self.store.consume("check", who.key, self._s.daily_check_limit)
-        return await self.store.consume("check", who.key, self._s.account_daily_check_limit) and await self.store.consume(
+        return await self.store.consume("check", who.key, self.check_limit(who)) and await self.store.consume(
             "check_ip", who.ip_key, self._s.daily_check_limit * 4
         )
 
@@ -49,7 +49,7 @@ class QuotaPolicy:
         """Un message de débat qui déclenche une vérification (appel LLM + recherche)."""
         if not await self.store.consume("debate", who.key, self.debate_limit(who)):
             return False
-        if who.plan == "free" and not await self.store.consume("debate_ip", who.ip_key, self._s.debate_daily_checks * 4):
+        if who.plan != "anonymous" and not await self.store.consume("debate_ip", who.ip_key, self._s.debate_daily_checks * 4):
             return False
         return await self.store.consume("debate_global", GLOBAL_KEY, self._s.debate_global_daily_checks)
 

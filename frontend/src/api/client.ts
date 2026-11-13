@@ -426,7 +426,7 @@ export async function pushHistory(token: string, entries: RemoteHistoryEntry[], 
 }
 
 export interface Usage {
-  plan: 'anonymous' | 'free'
+  plan: 'anonymous' | 'free' | 'pro'
   checks: { used: number; limit: number; remaining: number }
   /** Messages de débat vérifiés (budget distinct de celui du chatbot). */
   debate: { used: number; limit: number; remaining: number }
@@ -446,7 +446,7 @@ export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
     !c ||
     !b ||
     !isCount(b) ||
-    (d.plan !== 'anonymous' && d.plan !== 'free') ||
+    (d.plan !== 'anonymous' && d.plan !== 'free' && d.plan !== 'pro') ||
     typeof d.degraded !== 'boolean' ||
     typeof c.used !== 'number' ||
     typeof c.limit !== 'number' ||
@@ -460,4 +460,42 @@ export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
     debate: { used: b.used as number, limit: b.limit as number, remaining: b.remaining as number },
     degraded: d.degraded,
   }
+}
+
+// ---------- abonnement Pro ----------
+export interface Billing {
+  /** Le paiement est ouvert (sinon : « bientôt disponible »). */
+  enabled: boolean
+  priceLabel: string
+  plan: 'free' | 'pro'
+  status: string | null
+  currentPeriodEnd: string | null
+  /** Lien du prestataire pour gérer / résilier l'abonnement (https uniquement). */
+  portalUrl: string | null
+}
+
+const isHttps = (v: unknown): v is string => typeof v === 'string' && v.startsWith('https://') && v.length <= 2048
+
+export async function fetchBilling(signal?: AbortSignal): Promise<Billing> {
+  const response = await request('/api/v1/billing', { headers: optionalAuth(), signal }, 15_000)
+  if (!response.ok) throw await toApiError(response)
+  const d: unknown = await response.json().catch(() => null)
+  if (!isRecord(d) || typeof d.enabled !== 'boolean' || (d.plan !== 'free' && d.plan !== 'pro')) throw BAD_RESPONSE()
+  return {
+    enabled: d.enabled,
+    priceLabel: typeof d.price_label === 'string' ? d.price_label.slice(0, 60) : '',
+    plan: d.plan,
+    status: typeof d.status === 'string' ? d.status : null,
+    currentPeriodEnd: typeof d.current_period_end === 'string' ? d.current_period_end : null,
+    portalUrl: isHttps(d.portal_url) ? d.portal_url : null,
+  }
+}
+
+/** Adresse de paiement du prestataire pour le compte connecté (jamais ouverte sans validation https). */
+export async function startCheckout(signal?: AbortSignal): Promise<string> {
+  const response = await request('/api/v1/billing/checkout', { method: 'POST', headers: optionalAuth(), signal }, 20_000)
+  if (!response.ok) throw await toApiError(response, 'Paiement indisponible pour le moment.')
+  const d: unknown = await response.json().catch(() => null)
+  if (!isRecord(d) || !isHttps(d.url)) throw BAD_RESPONSE()
+  return d.url
 }

@@ -87,3 +87,28 @@ usage_counters = Table(
     Column("day", Date, primary_key=True),
     Column("count", Integer, nullable=False, server_default="0"),
 )
+
+# Abonnement Pro (une ligne par compte). `provider_*` = identifiants chez le prestataire de paiement ; aucune donnée
+# bancaire n'est jamais reçue ni stockée ici. `event_at` = horodatage du dernier évènement appliqué (ignore les
+# évènements plus anciens livrés en retard).
+subscriptions = Table(
+    "subscriptions",
+    metadata,
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("provider", String(24), nullable=False),
+    Column("provider_subscription_id", String(64), nullable=False, unique=True),
+    Column("provider_customer_id", String(64), nullable=True),
+    Column("status", String(24), nullable=False),
+    Column("current_period_end", DateTime(timezone=True), nullable=True),
+    Column("portal_url", String(512), nullable=True),
+    Column("event_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+# Évènements de paiement déjà traités (empreinte du corps reçu) : une même livraison rejouée est sans effet.
+billing_events = Table(
+    "billing_events",
+    metadata,
+    Column("event_id", String(64), primary_key=True),
+    Column("received_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)

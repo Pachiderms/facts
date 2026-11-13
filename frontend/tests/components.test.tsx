@@ -374,7 +374,8 @@ describe('Pied de page', () => {
   it('n’expose aucun lien vers le code source', async () => {
     const { Footer } = await import('../src/components/Layout')
     const { container } = render(<Footer />)
-    expect(container.querySelector('a')).toBeNull()
+    // Seuls des liens internes (tarifs, documents légaux) : rien vers un dépôt ou un site externe.
+    for (const a of container.querySelectorAll('a')) expect(a.getAttribute('href')).toMatch(/^#\//)
     expect(container.textContent).not.toMatch(/code source|github/i)
     expect(container.textContent).toMatch(/consultez toujours les sources/)
   })

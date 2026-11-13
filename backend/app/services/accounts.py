@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.identity import is_valid_token, participant_id
 from app.db.engine import Database
-from app.db.schema import sessions, user_participants, user_rooms, users
+from app.db.schema import sessions, subscriptions, user_participants, user_rooms, users
 from app.services.google_auth import GoogleIdentity
 
 SESSION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")  # token_urlsafe(32)
@@ -129,6 +129,7 @@ class AccountService:
                 )
             ).mappings().all()
             rooms_rows = (await s.execute(select(user_rooms).where(user_rooms.c.user_id == user_id))).mappings().all()
+            sub = (await s.execute(select(subscriptions).where(subscriptions.c.user_id == user_id))).mappings().first()
             linked = (
                 await s.execute(select(func.count()).select_from(user_participants).where(user_participants.c.user_id == user_id))
             ).scalar_one()
@@ -142,6 +143,13 @@ class AccountService:
             },
             "sessions": [{k: v.isoformat() for k, v in r.items()} for r in session_rows],
             "linked_anonymous_identities": linked,
+            "subscription": None
+            if sub is None
+            else {
+                "provider": sub["provider"],
+                "status": sub["status"],
+                "current_period_end": sub["current_period_end"].isoformat() if sub["current_period_end"] else None,
+            },
             "rooms_history": [
                 {"id": r["room_id"], "title": r["title"], "visibility": r["visibility"], "owner": r["owner"],
                  "pinned": r["pinned"], "last_visit_ms": r["last_visit"]}

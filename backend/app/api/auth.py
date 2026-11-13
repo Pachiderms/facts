@@ -111,6 +111,12 @@ async def export(request: Request, user: User = Depends(current_user)) -> dict:
 async def delete_account(request: Request, body: DeleteAccount, user: User = Depends(current_user)) -> dict:
     if not body.confirm:
         raise HTTPException(status_code=422, detail="Confirmation requise.")
+    billing = getattr(request.app.state, "billing", None)
+    if billing is not None:
+        info = await billing.status(user.id)
+        if info["active"] and info["status"] != "cancelled":
+            # La suppression n'annule pas la facturation chez le prestataire : on évite de faire payer un compte disparu.
+            raise HTTPException(status_code=409, detail="Résiliez d'abord votre abonnement Pro (page Tarifs), puis supprimez le compte.")
     await _service(request).delete_account(user.id)
     logger.info("compte supprimé")  # jamais l'e-mail dans les journaux
     return {"deleted": True}

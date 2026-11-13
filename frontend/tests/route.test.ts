@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseHash, parseJoinInput, roomHref } from '../src/lib/route'
+import { legalHref, parseHash, parseJoinInput, PRICING_HREF, roomHref } from '../src/lib/route'
 
 describe('parseHash', () => {
   it.each([
@@ -85,4 +85,23 @@ describe('parseJoinInput (Rejoindre un salon)', () => {
     ['https://exemple.fr/#/autre/chose', ''], // lien qui n'est pas un salon
     ['https://exemple.fr/#/arena', ''], // liste, pas un salon
   ])('refuse %j (code %j)', (raw, code) => expect(parseJoinInput(raw, code)).toBeNull())
+})
+
+describe('routes Tarifs et pages légales', () => {
+  it.each([
+    ['#/tarifs', { name: 'pricing' }],
+    ['#/tarifs/', { name: 'pricing' }],
+    ['#/mentions-legales', { name: 'legal', doc: 'mentions' }],
+    ['#/confidentialite/', { name: 'legal', doc: 'confidentialite' }],
+    ['#/cgu', { name: 'legal', doc: 'cgu' }],
+  ])('%s', (hash, expected) => expect(parseHash(hash)).toEqual(expected))
+
+  it.each(['#/tarifs/extra', '#/cgu/x', '#/CGU', '#/mentions', '#/tarifs?x=1'])('%s retombe sur l’accueil', (hash) => {
+    expect(parseHash(hash)).toEqual({ name: 'check' })
+  })
+
+  it('les liens générés se relisent à l’identique', () => {
+    expect(parseHash(PRICING_HREF)).toEqual({ name: 'pricing' })
+    for (const doc of ['mentions', 'confidentialite', 'cgu'] as const) expect(parseHash(legalHref(doc))).toEqual({ name: 'legal', doc })
+  })
 })
