@@ -16,6 +16,7 @@ from app.core.cache import TTLCache
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
 from app.core.text import fit_sentences
 from app.services.rooms import THEMES
+from app.core.metering import operation
 
 logger = logging.getLogger("facts.reformulation")
 
@@ -87,7 +88,8 @@ class ThemeReformulator:
         user_prompt = f"<SUJET>\n{clean}\n</SUJET>"
 
         for attempt in range(1, ATTEMPTS + 1):
-            raw = await self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=400, temperature=0.2)
+            with operation("reformulation", count_action=attempt == 1):
+                raw = await self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=400, temperature=0.2)
             try:
                 out = _Output.model_validate(parse_json_object(raw))
             except (LLMError, ValidationError):

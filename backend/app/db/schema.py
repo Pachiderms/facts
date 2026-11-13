@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Integer, ForeignKey, Index, MetaData, String, Table, Uuid, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, Date, DateTime, Integer, ForeignKey, Index, MetaData, PrimaryKeyConstraint, String, Table, Uuid, func
 from sqlalchemy.sql import expression
 
 # Noms de contraintes prévisibles : les migrations peuvent les retrouver et les supprimer.
@@ -111,4 +111,23 @@ billing_events = Table(
     metadata,
     Column("event_id", String(64), primary_key=True),
     Column("received_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+
+
+# Coûts réels, agrégés par jour UTC (aucune donnée personnelle : ni identité, ni IP, ni contenu).
+# Les prix ne sont pas stockés : ils s'appliquent à la lecture (FACTS_COST_PRICES).
+cost_usage = Table(
+    "cost_usage",
+    metadata,
+    Column("day", Date, nullable=False),
+    Column("profile", String(16), nullable=False),
+    Column("operation", String(32), nullable=False),
+    Column("kind", String(16), nullable=False),
+    Column("name", String(64), nullable=False),
+    Column("calls", BigInteger, nullable=False, server_default="0"),
+    Column("errors", BigInteger, nullable=False, server_default="0"),
+    Column("prompt_tokens", BigInteger, nullable=False, server_default="0"),
+    Column("completion_tokens", BigInteger, nullable=False, server_default="0"),
+    Column("credits", BigInteger, nullable=False, server_default="0"),
+    PrimaryKeyConstraint("day", "profile", "operation", "kind", "name", name="pk_cost_usage"),
 )

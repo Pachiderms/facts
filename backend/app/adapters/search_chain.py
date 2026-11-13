@@ -17,11 +17,13 @@ from app.adapters.search import (
     WikipediaSearch,
 )
 from app.core.config import Settings
+from app.core.metering import record_search
 from app.core.resilience import CircuitBreaker, MonthlyQuota
 
 logger = logging.getLogger("facts.search")
 
 KNOWN_PROVIDERS = ("tavily", "wikipedia", "duckduckgo")
+CREDITS_PER_CALL = {"tavily": 1}  # recherche « basic » : 1 crédit ; les autres moteurs sont gratuits
 
 
 class GuardedProvider:
@@ -79,10 +81,12 @@ class FallbackSearch:
             try:
                 results = await guarded.provider.search(query, max_results)
             except SearchError:
+                record_search(guarded.name, error=True)
                 guarded.breaker.record_failure()
                 logger.warning("recherche : %s a échoué, repli sur le suivant", guarded.name)
                 continue
             guarded.breaker.record_success()
+            record_search(guarded.name, CREDITS_PER_CALL.get(guarded.name, 0))
             answered = True
             if results:
                 return results

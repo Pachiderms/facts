@@ -24,6 +24,13 @@ services:
       # Sel des empreintes de quotas (les IP ne sont jamais stockées en clair). Généré une fois, ne pas changer.
       - key: FACTS_QUOTA_SALT
         generateValue: true
+      # Mesure des coûts réels (voir DEPLOIEMENT.md). Sans jeton, l'endpoint admin n'existe pas (404).
+      - key: FACTS_PROFILE
+        value: beta
+      - key: FACTS_ADMIN_TOKEN
+        sync: false
+      - key: FACTS_COST_PRICES
+        sync: false
       # Paiement Pro (Lemon Squeezy) : ÉTEINT par défaut. Ne passer à "true" qu'après la création de la
       # micro-entreprise, du produit chez le prestataire et de ces trois variables (voir DEPLOIEMENT.md).
       - key: FACTS_PAYMENTS_ENABLED

@@ -9,6 +9,7 @@ from app.core.security import InvalidInputError, looks_like_prompt_injection, sa
 from app.core.text import fit_sentences
 from app.services.claim_triage import FIGURE_RE, OPINION_RE, ClaimExtractor, is_triage_candidate
 from app.services.factcheck import FactCheckService
+from app.core.metering import operation
 
 NOTE_MAX_CHARS = 420  # un message à plusieurs chiffres demande une note qui les couvre tous
 
@@ -107,10 +108,11 @@ class FactCheckMessageChecker:
 
     async def check(self, text: str, context: str | None = None) -> MessageCheck:
         try:
-            if context is None:
-                response = await self._service.check(text, institutional_filter=True)
-            else:
-                response = await self._service.check(text, institutional_filter=True, context=context)
+            with operation("room_check"):
+                if context is None:
+                    response = await self._service.check(text, institutional_filter=True)
+                else:
+                    response = await self._service.check(text, institutional_filter=True, context=context)
         except InvalidInputError:
             # Inclut les tentatives d'injection : le message reste visible, mais n'est pas évalué.
             return MessageCheck.unchecked("NON ÉVALUÉ")
