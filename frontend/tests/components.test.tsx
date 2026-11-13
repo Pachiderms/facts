@@ -5,6 +5,7 @@ import type { CheckResponse, MessageCheck, RoomMessage } from '../src/api/types'
 import { Composer } from '../src/components/arena/Composer'
 import { MessageCard } from '../src/components/arena/MessageCard'
 import { TrustMeter } from '../src/components/arena/TrustMeter'
+import { MAX_TILT, scaleAngle, scaleCaption } from '../src/components/arena/TrustScale'
 import { VerdictPanel } from '../src/components/check/VerdictPanel'
 
 const RESULT: CheckResponse = {
@@ -172,6 +173,65 @@ describe('TrustMeter', () => {
   })
 })
 
+describe('Balance du score (TrustScale)', () => {
+  it('angle : plat sans donnée, équilibre à 50, bornes ±MAX_TILT, valeurs hors plage écrêtées', () => {
+    expect(scaleAngle(null)).toBe(0)
+    expect(scaleAngle(Number.NaN)).toBe(0)
+    expect(scaleAngle(50)).toBe(0)
+    expect(scaleAngle(100)).toBe(MAX_TILT)
+    expect(scaleAngle(0)).toBe(-MAX_TILT)
+    expect(scaleAngle(150)).toBe(MAX_TILT)
+    expect(scaleAngle(-20)).toBe(-MAX_TILT)
+    expect(scaleAngle(75)).toBeCloseTo(MAX_TILT / 2)
+    expect(scaleAngle(75)).toBeGreaterThan(scaleAngle(60))
+  })
+
+  it('libellé : mêmes seuils que les couleurs (75 / 50)', () => {
+    expect(scaleCaption(null)).toBe('Aucun message vérifié')
+    expect(scaleCaption(75)).toBe('Plutôt vérifié')
+    expect(scaleCaption(74)).toBe('Équilibré')
+    expect(scaleCaption(50)).toBe('Équilibré')
+    expect(scaleCaption(49)).toBe('Plutôt non étayé')
+  })
+
+  it('le bloc affiche la balance (décorative), la couleur de la barre et le libellé', () => {
+    const { rerender } = render(<TrustMeter score={80} />)
+    const svg = screen.getByTestId('trust-scale')
+    expect(svg).toHaveAttribute('aria-hidden', 'true')
+    expect(svg).toHaveAttribute('data-angle', scaleAngle(80).toFixed(2))
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveClass('bg-emerald-600')
+    expect(screen.getByText('Plutôt vérifié')).toBeInTheDocument()
+    rerender(<TrustMeter score={55} />)
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveClass('bg-amber-500')
+    rerender(<TrustMeter score={20} />)
+    expect(screen.getByRole('progressbar').firstElementChild).toHaveClass('bg-red-600')
+    expect(screen.getByText('Plutôt non étayé')).toBeInTheDocument()
+    rerender(<TrustMeter score={null} />)
+    expect(screen.getByTestId('trust-scale')).toHaveAttribute('data-angle', '0.00')
+    expect(screen.getByTestId('trust-scale')).toHaveClass('opacity-50')
+  })
+
+  it('animé : le fléau part de l’équilibre et se stabilise sur l’angle cible', async () => {
+    const { container, rerender } = render(<TrustMeter score={50} />)
+    rerender(<TrustMeter score={0} />)
+    const beam = container.querySelector('g[transform^="rotate"]')
+    expect(beam?.getAttribute('transform')).toBe('rotate(0.00 200 63)') // pas de saut : l’animation part de l’équilibre
+    await vi.waitFor(() => expect(beam?.getAttribute('transform')).toBe(`rotate(${(-MAX_TILT).toFixed(2)} 200 63)`), { timeout: 4000 })
+  })
+
+  it('mouvement réduit : le fléau saute directement à l’angle cible, sans animation', () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), addEventListener() {}, removeEventListener() {} }))
+    try {
+      const { container, rerender } = render(<TrustMeter score={50} />)
+      rerender(<TrustMeter score={100} />)
+      const beam = container.querySelector('g[transform^="rotate"]')
+      expect(beam?.getAttribute('transform')).toBe(`rotate(${MAX_TILT.toFixed(2)} 200 63)`)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
 describe('Composer', () => {
   let onSend: ReturnType<typeof vi.fn<(text: string, replyTo: number | null) => boolean>>
   beforeEach(() => {
@@ -317,6 +377,15 @@ describe('Identité du site', () => {
     expect(container.textContent).toContain('CFD')
     expect(container.textContent).toMatch(/CaFaitDebat\./)
     expect(container.textContent).not.toMatch(/\bFacts\b/)
+  })
+
+  it('cliquer sur le logo ramène à l’accueil (vérificateur IA), depuis l’arène aussi', async () => {
+    const { Header } = await import('../src/components/Layout')
+    const onNavigate = vi.fn()
+    render(<Header page="arena" onNavigate={onNavigate} />)
+    await userEvent.click(screen.getByRole('button', { name: /retour à l’accueil/i }))
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+    expect(onNavigate).toHaveBeenCalledWith('check')
   })
 
   it('le titre de la page et la description portent le nouveau nom', async () => {
