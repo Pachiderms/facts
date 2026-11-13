@@ -294,3 +294,35 @@ describe('Composer : numéro de participant', () => {
     expect(screen.getByText('Vous êtes Participant 2')).toBeInTheDocument()
   })
 })
+
+describe('Pied de page', () => {
+  it('n’expose aucun lien vers le code source', async () => {
+    const { Footer } = await import('../src/components/Layout')
+    const { container } = render(<Footer />)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.textContent).not.toMatch(/code source|github/i)
+    expect(container.textContent).toMatch(/consultez toujours les sources/)
+  })
+})
+
+describe('Identité du site', () => {
+  it('l’en-tête affiche CaFaitDebat et le sigle CFD, plus l’ancien nom', async () => {
+    const { Header, Footer } = await import('../src/components/Layout')
+    const { container } = render(
+      <>
+        <Header page="check" onNavigate={() => undefined} />
+        <Footer />
+      </>,
+    )
+    expect(container.textContent).toContain('CFD')
+    expect(container.textContent).toMatch(/CaFaitDebat\./)
+    expect(container.textContent).not.toMatch(/\bFacts\b/)
+  })
+
+  it('le titre de la page et la description portent le nouveau nom', async () => {
+    const html = (await import('../index.html?raw')).default
+    expect(html).toMatch(/<title>CaFaitDebat\./)
+    expect(html).toContain('content="CaFaitDebat :')
+    expect(html).not.toMatch(/\bFacts\b/)
+  })
+})

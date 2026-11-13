@@ -131,3 +131,18 @@ Dans UptimeRobot, la page de détail du moniteur permet de relire les réponses 
 2. `resolved_ip` doit être **votre adresse publique** (comparez avec un site « quelle est mon IP »), et rester identique à chaque rechargement. Sinon, ajustez `FACTS_PROXY_HOPS` (0, 1, 2…) sur Render en regardant `x_forwarded_for` : la bonne valeur est le nombre d'adresses qui suivent la vôtre.
 3. Le blueprint crée `FACTS_QUOTA_SALT` automatiquement. Sur un service existant, ajoutez-la à la main (une valeur aléatoire quelconque, **à ne plus changer** : la changer repart de zéro pour tout le monde) et ajoutez `FACTS_PROXY_HOPS=1`.
 4. Les compteurs sont dans Neon (migration 0004 appliquée au démarrage) : ils survivent aux veilles et redéploiements.
+
+## Nom de domaine personnalisé (exemple : `cafaitdebat.fr`)
+
+Le site et l'API peuvent garder leurs adresses gratuites ; un domaine à vous les rend plus sûres et plus lisibles. Ordre qui ne casse rien (les anciennes adresses restent actives pendant la transition) :
+
+1. **Acheter** le domaine (OVHcloud, Gandi…). Un particulier peut le faire ; la micro-entreprise sera nécessaire avant d'encaisser des paiements.
+2. **Cloudflare** : *Add a domain* (offre Free). Vérifier que les enregistrements existants (MX/TXT de la messagerie incluse) ont été importés. Chez le registrar, remplacer les serveurs de noms par les deux de Cloudflare.
+3. **Site** : Worker → *Settings → Domains & Routes → Add → Custom domain* : `domaine.fr` et `www.domaine.fr`.
+4. **API** : Render → *Settings → Custom Domains* → `api.domaine.fr`. Dans Cloudflare, `CNAME api` → `<service>.onrender.com`, en **« DNS only » (nuage gris)** : le proxy Cloudflare ajouterait une adresse dans `X-Forwarded-For` et fausserait les quotas par IP.
+5. **Render** : `FACTS_CORS_ORIGINS=https://domaine.fr,https://www.domaine.fr` (virgules, sans slash final ; garder l'ancienne adresse le temps de la transition).
+6. **Cloudflare, variables de build** : `VITE_API_URL=https://api.domaine.fr`, puis relancer un build (la valeur est figée à la construction ; la CSP en est déduite).
+7. **Google Cloud** : *Identifiants → ID client OAuth → Origines JavaScript autorisées* : `https://domaine.fr` et `https://www.domaine.fr`. (Les « domaines autorisés » de l'écran de consentement sont un réglage différent, à renseigner aussi.)
+8. **Pinger** : `https://api.domaine.fr/health`.
+9. **Vérifier** : `https://api.domaine.fr/health` ; `/health/ip` (`resolved_ip` = votre adresse publique, sinon ajuster `FACTS_PROXY_HOPS`) ; un salon (WebSocket) ; la connexion Google.
+10. **Ensuite** : retirer les anciennes origines (`workers.dev`) de CORS et de Google ; activer le DNSSEC dans Cloudflare et recopier l'enregistrement DS chez le registrar.
