@@ -113,7 +113,7 @@ export async function checkAssertion(
     '/api/v1/check',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...optionalAuth() }, // compte : quota par compte
       body: JSON.stringify({ assertion, institutional_filter: institutionalFilter }),
       signal,
     },
@@ -423,4 +423,30 @@ export async function pushHistory(token: string, entries: RemoteHistoryEntry[], 
   )
   if (!response.ok) throw await toApiError(response)
   return parseRemoteHistory(await response.json().catch(() => null))
+}
+
+export interface Usage {
+  plan: 'anonymous' | 'free'
+  checks: { used: number; limit: number; remaining: number }
+  /** Le service tourne avec un modèle de secours ou à capacité réduite. */
+  degraded: boolean
+}
+
+export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
+  const response = await request('/api/v1/usage', { headers: optionalAuth(), signal }, 15_000)
+  if (!response.ok) throw await toApiError(response)
+  const d: unknown = await response.json().catch(() => null)
+  const c = isRecord(d) && isRecord(d.checks) ? d.checks : null
+  if (
+    !isRecord(d) ||
+    !c ||
+    (d.plan !== 'anonymous' && d.plan !== 'free') ||
+    typeof d.degraded !== 'boolean' ||
+    typeof c.used !== 'number' ||
+    typeof c.limit !== 'number' ||
+    typeof c.remaining !== 'number'
+  ) {
+    throw BAD_RESPONSE()
+  }
+  return { plan: d.plan, checks: { used: c.used, limit: c.limit, remaining: c.remaining }, degraded: d.degraded }
 }

@@ -2,6 +2,7 @@ import { AlertTriangle, Building2, Globe, RefreshCw, Sparkles } from 'lucide-rea
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ASSERTION_MAX, ASSERTION_MIN } from '../api/types'
 import { VerdictPanel } from '../components/check/VerdictPanel'
+import { UsageNote } from '../components/check/UsageNote'
 import { useCheck } from '../hooks/useCheck'
 
 const EXAMPLES = [
@@ -42,6 +43,7 @@ export function CheckPage() {
             <p className="mt-1 text-xs text-neutral-500">
               Soumettez une déclaration. L’agent interroge le web et confronte les analyses de façon neutre et sourcée.
             </p>
+            <UsageNote refreshKey={result ?? error} />
           </div>
 
           <div className="flex items-center space-x-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs">

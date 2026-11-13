@@ -105,6 +105,14 @@ class SlidingWindowRateLimiter:
         dq.append(now)
         return True
 
+    def used(self, key: str) -> int:
+        """Nombre de requêtes déjà comptées dans la fenêtre pour cette clé (sans en consommer)."""
+        dq = self._hits.get(key)
+        if not dq:
+            return 0
+        self._prune(dq, self._clock())
+        return len(dq)
+
     def retry_after(self, key: str) -> int:
         """Secondes avant qu'une requête soit de nouveau acceptée (pour l'en-tête Retry-After)."""
         dq = self._hits.get(key)

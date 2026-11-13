@@ -33,3 +33,7 @@ services:
         sync: false
       - key: FACTS_LLM_REASONING_EFFORT
         value: low
+      # Modèle de secours (autre modèle Groq = autre quota) : repris si le modèle principal répond 429
+      # ou si le plafond global quotidien d'appels (FACTS_LLM_GLOBAL_DAILY_CALLS, 900) est atteint.
+      - key: FACTS_LLM_FALLBACK_MODEL
+        value: openai/gpt-oss-20b

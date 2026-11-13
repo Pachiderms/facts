@@ -62,7 +62,8 @@ class Settings(BaseSettings):
     cache_max_entries: int = 500
 
     # Plafonds par visiteur et par jour (protègent les crédits de recherche et les quotas LLM)
-    daily_check_limit: int = 30
+    daily_check_limit: int = 30  # visiteur sans compte, par IP
+    account_daily_check_limit: int = 60  # compte gratuit, par compte (l'IP garde un plafond large : daily_check_limit x 4)
     daily_ws_message_limit: int = 200
 
     # Tri des messages par le LLM : repère les faits sans chiffre. Coûte un appel LLM par message long sans chiffre ;
@@ -76,6 +77,14 @@ class Settings(BaseSettings):
     llm_model: str = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile est retiré chez Groq depuis le 16/08/2026
     llm_reasoning_effort: str = ""  # "low" recommandé avec les modèles gpt-oss ; vide = non envoyé
     llm_timeout_seconds: float = 30.0
+    # Modèle de secours (vide = aucun) : autre modèle donc autre quota. Même fournisseur et même clé par défaut.
+    llm_fallback_model: str = ""
+    llm_fallback_base_url: str = ""
+    llm_fallback_api_key: str = ""
+    llm_fallback_reasoning_effort: str = ""
+    # Plafond global d'appels au modèle principal par 24 h glissantes (Groq gratuit : 1 000/jour). 0 = pas de plafond.
+    llm_global_daily_calls: int = 900
+    llm_primary_cooldown_seconds: float = 60.0
 
     # Saisie vocale (Groq Whisper). Désactivée sans clé. Offre gratuite Groq : ~28 800 s d'audio par jour.
     stt_enabled: bool = True

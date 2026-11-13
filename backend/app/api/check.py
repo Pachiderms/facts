@@ -21,7 +21,7 @@ async def check(
 ) -> CheckResponse:
     # Plafond quotidien appliqué APRÈS validation du corps : une requête invalide (422) ne coûte
     # ni recherche ni appel LLM, elle ne doit donc pas consommer le crédit du visiteur.
-    enforce_daily_check_limit(request)
+    await enforce_daily_check_limit(request)
     # Les messages d'erreur sont volontairement génériques : aucun détail interne
     # (URL du fournisseur, clé, trace) ne doit fuiter vers le client.
     try:

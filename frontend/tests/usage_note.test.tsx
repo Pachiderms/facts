@@ -1,0 +1,67 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
+import { checkAssertion, fetchUsage } from '../src/api/client'
+import { UsageNote } from '../src/components/check/UsageNote'
+import { clearSession, setSession } from '../src/lib/session'
+
+const TOKEN = 'T'.repeat(43)
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+const usage = (over = {}) => ({ plan: 'anonymous', checks: { used: 5, limit: 30, remaining: 25 }, degraded: false, ...over })
+
+let fetchMock: MockInstance<typeof fetch>
+beforeEach(() => {
+  localStorage.clear()
+  clearSession()
+  fetchMock = vi.spyOn(globalThis, 'fetch')
+})
+afterEach(() => vi.restoreAllMocks())
+
+describe('fetchUsage', () => {
+  it('lit le quota et envoie la session seulement si elle existe', async () => {
+    fetchMock.mockImplementation(async () => json(usage()))
+    expect((await fetchUsage()).checks.remaining).toBe(25)
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).not.toHaveProperty('Authorization')
+    setSession(TOKEN)
+    await fetchUsage()
+    expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: `Bearer ${TOKEN}` })
+  })
+
+  it('rejette une réponse hors contrat', async () => {
+    for (const bad of [{}, usage({ plan: 'pro' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } })]) {
+      fetchMock.mockResolvedValueOnce(json(bad))
+      await expect(fetchUsage()).rejects.toThrow()
+    }
+  })
+
+  it('la vérification d’une affirmation porte la session (quota du compte)', async () => {
+    setSession(TOKEN)
+    fetchMock.mockResolvedValue(json({}, 500))
+    await checkAssertion('x'.repeat(30), true).catch(() => undefined)
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: `Bearer ${TOKEN}` })
+  })
+})
+
+describe('UsageNote', () => {
+  it('affiche le quota restant, au pluriel correct', async () => {
+    fetchMock.mockResolvedValue(json(usage()))
+    render(<UsageNote refreshKey={0} />)
+    expect(await screen.findByText(/25 vérifications restantes aujourd’hui sur 30/)).toBeTruthy()
+    fetchMock.mockResolvedValue(json(usage({ checks: { used: 29, limit: 30, remaining: 1 } })))
+    render(<UsageNote refreshKey={1} />)
+    expect(await screen.findByText(/1 vérification restante aujourd’hui/)).toBeTruthy()
+  })
+
+  it('limite atteinte et service dégradé', async () => {
+    fetchMock.mockResolvedValue(json(usage({ checks: { used: 30, limit: 30, remaining: 0 }, degraded: true })))
+    render(<UsageNote refreshKey={0} />)
+    expect(await screen.findByText(/Limite du jour atteinte/)).toBeTruthy()
+    expect(screen.getByText(/très sollicité/)).toBeTruthy()
+  })
+
+  it('n’affiche rien si le serveur ne répond pas (pas de faux chiffre)', async () => {
+    fetchMock.mockRejectedValue(new TypeError('réseau'))
+    const { container } = render(<UsageNote refreshKey={0} />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    expect(container.textContent).toBe('')
+  })
+})
