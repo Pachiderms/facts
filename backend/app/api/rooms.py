@@ -231,7 +231,7 @@ async def reformulate_room_title(request: Request, body: ReformulateRequest):
     except InvalidInputError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None  # sans coût : avant le quota
 
-    ip = get_client_ip(request, settings.trust_proxy_headers)
+    ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
     limiter = app.state.daily_reformulation_limiter
     if not limiter.allow(ip):
         raise HTTPException(
@@ -292,7 +292,7 @@ async def create_room(request: Request, body: CreateRoomRequest):
     # Pertinence du sujet : le bouton « reformuler » est facultatif, donc le contrôle est aussi côté
     # serveur (sinon il suffirait de ne pas cliquer pour créer un salon poubelle). Avant le quota de
     # création : un sujet refusé ne coûte rien à l'utilisateur.
-    ip = get_client_ip(request, settings.trust_proxy_headers)
+    ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
     await _ensure_relevant(request, title, ip)
 
     # Après la validation : une requête invalide ne consomme pas le quota quotidien.
@@ -355,7 +355,7 @@ async def delete_room(request: Request, room_id: str, body: DeleteRoomRequest):
 async def room_ws(ws: WebSocket, room_id: str) -> None:
     app = ws.app
     settings: Settings = app.state.settings
-    ip = get_client_ip(ws, settings.trust_proxy_headers)
+    ip = get_client_ip(ws, settings.trust_proxy_headers, settings.proxy_hops)
 
     room = app.state.rooms.get(room_id) if ROOM_ID_RE.fullmatch(room_id) else None
     if room is None or not _origin_allowed(ws, settings):
@@ -412,7 +412,9 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             await _evict_replaced(replaced)
         await ws.send_json(room.snapshot(client.role, client.participant_id, client.number))
         await room.broadcast_presence()
-        await _receive_loop(ws, room, client, ip, settings)
+        quota = app.state.quota_policy
+        who_q = quota.account(who.id, ip) if who.id.startswith("u:") else quota.anonymous(ip)
+        await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_debate(who_q))
     except RuntimeError:
         pass  # socket déjà fermée côté client pendant un envoi
     finally:
@@ -458,7 +460,7 @@ async def _evict_replaced(old) -> None:
         pass  # déjà morte : rien à faire
 
 
-async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings) -> None:
+async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings, allow_check=None) -> None:
     limiter = ws.app.state.ws_limiter
     hard_limit = settings.ws_max_message_chars * 6 + 200  # place pour l'échappement JSON
     strikes = 0
@@ -496,7 +498,7 @@ async def _receive_loop(ws: WebSocket, room, client, ip: str, settings: Settings
                 elif isinstance(event, TakeSeatEvent):
                     await room.take_seat(client)
                 else:
-                    await room.post_message(client, event.text, event.reply_to)
+                    await room.post_message(client, event.text, event.reply_to, allow_check)
                     if room.is_banned(client):  # 3e message illégal : la connexion est fermée
                         await ws.close(code=WS_POLICY_VIOLATION)
                         return

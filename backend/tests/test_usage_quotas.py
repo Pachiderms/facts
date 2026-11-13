@@ -83,7 +83,9 @@ def test_invalid_body_does_not_consume_the_account_quota():
 # ---------- /usage ----------
 def test_usage_for_anonymous_and_account():
     c = client_with_accounts(daily_check_limit=3, account_daily_check_limit=5)
-    assert c.get("/api/v1/usage").json() == {"plan": "anonymous", "checks": {"used": 0, "limit": 3, "remaining": 3}, "degraded": False}
+    assert c.get("/api/v1/usage").json() == {
+        "plan": "anonymous", "checks": {"used": 0, "limit": 3, "remaining": 3}, "debate": {"used": 0, "limit": 40, "remaining": 40}, "degraded": False,
+    }
     post(c)
     post(c, TOKEN_A)
     post(c, TOKEN_A)

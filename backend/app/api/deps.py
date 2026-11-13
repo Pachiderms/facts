@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request
 
+from app.core.identity import account_identity
 from app.core.security import get_client_ip
 from app.services.factcheck import FactCheckService
 
@@ -12,7 +13,7 @@ def get_service(request: Request) -> FactCheckService:
 
 def enforce_rate_limit(request: Request) -> None:
     limiter = request.app.state.limiter
-    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers)
+    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers, request.app.state.settings.proxy_hops)
     if not limiter.allow(ip):
         raise HTTPException(
             status_code=429,
@@ -24,7 +25,7 @@ def enforce_rate_limit(request: Request) -> None:
 def enforce_read_rate_limit(request: Request) -> None:
     """Lectures sans coût (liste des salons) : plafond plus large, compteur indépendant de /check."""
     limiter = request.app.state.read_limiter
-    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers)
+    ip = get_client_ip(request, request.app.state.settings.trust_proxy_headers, request.app.state.settings.proxy_hops)
     if not limiter.allow(ip):
         raise HTTPException(
             status_code=429,
@@ -45,30 +46,27 @@ async def optional_user(request: Request):
         return None
 
 
+async def quota_who(request: Request):
+    """Qui consomme : compte (session valide) ou visiteur anonyme (IP). Voir QuotaPolicy."""
+    state = request.app.state
+    ip = get_client_ip(request, state.settings.trust_proxy_headers, state.settings.proxy_hops)
+    user = await optional_user(request)
+    if user is None:
+        return state.quota_policy.anonymous(ip)
+    return state.quota_policy.account(account_identity(user.id), ip)  # même clé que le débat (WebSocket)
+
+
 async def enforce_daily_check_limit(request: Request) -> None:
     """Plafond par jour : protège les crédits de recherche et les quotas LLM gratuits.
 
     Sans compte : par IP. Avec un compte : par compte (plafond plus haut), l'IP gardant un plafond large
     pour qu'une personne ne multiplie pas ses quotas en créant des comptes depuis une même connexion.
+    Compteurs durables (base) : un redémarrage du serveur ne les remet pas à zéro.
     """
-    state = request.app.state
-    ip = get_client_ip(request, state.settings.trust_proxy_headers)
-    user = await optional_user(request)
-    if user is not None:
-        if state.account_check_limiter.allow(str(user.id)) and state.ip_backstop_limiter.allow(ip):
-            return
-        limiter, key = state.account_check_limiter, str(user.id)
-        if limiter.used(key) < limiter.max_requests:  # c'est le filet par IP qui a refusé
-            limiter, key = state.ip_backstop_limiter, ip
+    policy = request.app.state.quota_policy
+    if not await policy.consume_check(await quota_who(request)):
         raise HTTPException(
             status_code=429,
             detail="Limite quotidienne de vérifications atteinte. Revenez demain.",
-            headers={"Retry-After": str(limiter.retry_after(key))},
-        )
-    limiter = state.daily_check_limiter
-    if not limiter.allow(ip):
-        raise HTTPException(
-            status_code=429,
-            detail="Limite quotidienne de vérifications atteinte. Revenez demain.",
-            headers={"Retry-After": str(limiter.retry_after(ip))},
+            headers={"Retry-After": str(policy.store.retry_after())},
         )

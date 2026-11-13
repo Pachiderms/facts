@@ -223,3 +223,19 @@ def test_history_responses_are_not_cacheable(fresh_db):
     with make_client() as c:
         h = auth(session_for(c))
         assert c.get("/api/v1/me/history", headers=h).headers["cache-control"] == "no-store"
+
+
+def test_debate_budget_follows_the_account_plan(fresh_db):
+    with make_client(debate_daily_checks=1, account_debate_daily_checks=3, rate_limit_requests=1000) as c:
+        made = create(c, ANON, visibility="public").json()
+        sess = session_for(c)
+        with c.websocket_connect(f"/api/v1/rooms/{made['id']}/ws") as ws:
+            ws.send_json({"type": "hello", "token": ANON, "session": sess})
+            recv_until(ws, "snapshot")
+            statuses = []
+            for i in range(4):
+                ws.send_json({"type": "message", "text": f"Selon l'INSEE, l'inflation est de {i + 2} % en 2025."})
+                statuses.append(recv_until(ws, "message")["message"]["check"]["status"])
+            assert statuses == ["pending", "pending", "pending", "unchecked"]  # 3 = plafond du compte, pas 1 (anonyme)
+        usage = c.get("/api/v1/usage", headers=auth(sess)).json()
+        assert usage["plan"] == "free" and usage["debate"] == {"used": 3, "limit": 3, "remaining": 0}

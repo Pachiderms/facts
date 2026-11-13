@@ -428,6 +428,8 @@ export async function pushHistory(token: string, entries: RemoteHistoryEntry[], 
 export interface Usage {
   plan: 'anonymous' | 'free'
   checks: { used: number; limit: number; remaining: number }
+  /** Messages de débat vérifiés (budget distinct de celui du chatbot). */
+  debate: { used: number; limit: number; remaining: number }
   /** Le service tourne avec un modèle de secours ou à capacité réduite. */
   degraded: boolean
 }
@@ -437,9 +439,13 @@ export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
   if (!response.ok) throw await toApiError(response)
   const d: unknown = await response.json().catch(() => null)
   const c = isRecord(d) && isRecord(d.checks) ? d.checks : null
+  const b = isRecord(d) && isRecord(d.debate) ? d.debate : null
+  const isCount = (v: Record<string, unknown>) => typeof v.used === 'number' && typeof v.limit === 'number' && typeof v.remaining === 'number'
   if (
     !isRecord(d) ||
     !c ||
+    !b ||
+    !isCount(b) ||
     (d.plan !== 'anonymous' && d.plan !== 'free') ||
     typeof d.degraded !== 'boolean' ||
     typeof c.used !== 'number' ||
@@ -448,5 +454,10 @@ export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
   ) {
     throw BAD_RESPONSE()
   }
-  return { plan: d.plan, checks: { used: c.used, limit: c.limit, remaining: c.remaining }, degraded: d.degraded }
+  return {
+    plan: d.plan,
+    checks: { used: c.used, limit: c.limit, remaining: c.remaining },
+    debate: { used: b.used as number, limit: b.limit as number, remaining: b.remaining as number },
+    degraded: d.degraded,
+  }
 }

@@ -480,7 +480,13 @@ class Room:
             return False
 
     # ---------- messages ----------
-    async def post_message(self, client: Client, text: str, reply_to: int | None = None) -> dict[str, Any] | None:
+    async def post_message(
+        self,
+        client: Client,
+        text: str,
+        reply_to: int | None = None,
+        allow_check: Callable[[], Awaitable[bool]] | None = None,
+    ) -> dict[str, Any] | None:
         """Publie le message. Renvoie None s'il est refusé par la modération (l'auteur est prévenu)."""
         if client.role == "spectator":
             raise NotAllowedError("Les spectateurs ne peuvent pas intervenir.")
@@ -504,6 +510,9 @@ class Room:
                 return None
 
         needs_check = self._checkable(clean)
+        over_quota = False
+        if needs_check and allow_check is not None and not await allow_check():
+            needs_check, over_quota = False, True  # quota de vérifications du jour atteint : le message est publié sans vérification
         self._next_id += 1
         self.total_messages += 1
         message = {
@@ -512,7 +521,9 @@ class Room:
             "speaker_name": f"Participant {client.number}",  # anonymes : aucune étiquette politique
             "text": clean,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "check": (MessageCheck.pending() if needs_check else MessageCheck.no_claim()).model_dump(),
+            "check": (
+                MessageCheck.pending() if needs_check else MessageCheck.unchecked("QUOTA DU JOUR ATTEINT") if over_quota else MessageCheck.no_claim()
+            ).model_dump(),
             # Citation : numéro de l'auteur et aperçu repris du message d'origine par le SERVEUR (jamais fourni par le client).
             "reply_to": None if quoted is None else {"id": quoted["id"], "speaker": quoted["speaker"], "preview": reply_preview(quoted["text"])},
         }

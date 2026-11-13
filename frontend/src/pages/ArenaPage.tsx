@@ -1,4 +1,5 @@
 import { Plus, Search } from 'lucide-react'
+import { UsageNote } from '../components/check/UsageNote'
 import { useId, useState } from 'react'
 import { CreateRoomForm } from '../components/arena/CreateRoomForm'
 import { MyRooms } from '../components/arena/MyRooms'
@@ -29,6 +30,7 @@ export function ArenaPage() {
             Rejoignez un salon pour débattre : chaque chiffre avancé est vérifié en direct et alimente un score de fiabilité factuelle. Les
             participants sont anonymes et sans étiquette politique.
           </p>
+          <UsageNote kind="debate" refreshKey={null} />
         </div>
         <button
           type="button"

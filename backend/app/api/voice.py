@@ -65,7 +65,7 @@ async def transcribe(request: Request) -> dict[str, str | float]:
     if not ctype.startswith("audio/"):
         raise HTTPException(status_code=415, detail="Format non pris en charge.")
 
-    ip = get_client_ip(request, settings.trust_proxy_headers)
+    ip = get_client_ip(request, settings.trust_proxy_headers, settings.proxy_hops)
     pid = participant_id(token)
     # Plafonds contrôlés AVANT de lire le corps et d'appeler le fournisseur.
     _limited(app.state.stt_minute_limiter, ip, "Trop de requêtes. Réessayez dans un instant.")
