@@ -20,7 +20,7 @@ export function scaleCaption(score: number | null): string {
 
 const PIVOT_X = 200
 const PIVOT_Y = 63
-const HALF_BEAM = 170
+const HALF_BEAM = 140
 const STIFFNESS = 38
 const DAMPING = 5.2
 
@@ -101,7 +101,7 @@ export function TrustScale({ score }: { score: number | null }) {
       <path d="M160 190 Q200 172 240 190 Z" fill="#171717" />
       <rect x="195" y="63" width="10" height="122" rx="4" fill="#171717" />
       <g ref={beam} transform={`rotate(${mounted.toFixed(2)} ${PIVOT_X} ${PIVOT_Y})`}>
-        <rect x="30" y="56" width="340" height="14" rx="7" fill="#171717" />
+        <rect x="60" y="56" width="280" height="14" rx="7" fill="#171717" />
         <circle cx="200" cy="63" r="14" fill="#171717" />
       </g>
       <circle cx="200" cy="63" r="4" fill="#fafafa" />

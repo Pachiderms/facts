@@ -211,6 +211,21 @@ describe('Balance du score (TrustScale)', () => {
     expect(screen.getByTestId('trust-scale')).toHaveClass('opacity-50')
   })
 
+  it.each([0, 25, 50, 75, 100, null])('score %s : plateaux et fléau restent entièrement dans le cadre (rien de coupé)', (score) => {
+    const { container } = render(<TrustMeter score={score} />)
+    const svg = screen.getByTestId('trust-scale')
+    const [, , w, h] = svg.getAttribute('viewBox')!.split(' ').map(Number) as [number, number, number, number]
+    const pans = [...container.querySelectorAll('svg > g:not([transform^="rotate"])')]
+    expect(pans).toHaveLength(2)
+    for (const pan of pans) {
+      const m = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(pan.getAttribute('transform') ?? '')!
+      const x = Number(m[1]), y = Number(m[2])
+      expect(x - 48).toBeGreaterThanOrEqual(0) // demi-largeur du plateau
+      expect(x + 48).toBeLessThanOrEqual(w)
+      expect(y + 90).toBeLessThanOrEqual(h) // fond du plateau
+    }
+  })
+
   it('animé : le fléau part de l’équilibre et se stabilise sur l’angle cible', async () => {
     const { container, rerender } = render(<TrustMeter score={50} />)
     rerender(<TrustMeter score={0} />)
