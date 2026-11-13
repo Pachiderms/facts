@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.identity import is_valid_token, participant_id
 from app.db.engine import Database
-from app.db.schema import sessions, user_participants, users
+from app.db.schema import sessions, user_participants, user_rooms, users
 from app.services.google_auth import GoogleIdentity
 
 SESSION_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{43}")  # token_urlsafe(32)
@@ -128,6 +128,7 @@ class AccountService:
                     .order_by(sessions.c.created_at)
                 )
             ).mappings().all()
+            rooms_rows = (await s.execute(select(user_rooms).where(user_rooms.c.user_id == user_id))).mappings().all()
             linked = (
                 await s.execute(select(func.count()).select_from(user_participants).where(user_participants.c.user_id == user_id))
             ).scalar_one()
@@ -141,6 +142,11 @@ class AccountService:
             },
             "sessions": [{k: v.isoformat() for k, v in r.items()} for r in session_rows],
             "linked_anonymous_identities": linked,
+            "rooms_history": [
+                {"id": r["room_id"], "title": r["title"], "visibility": r["visibility"], "owner": r["owner"],
+                 "pinned": r["pinned"], "last_visit_ms": r["last_visit"]}
+                for r in rooms_rows
+            ],
         }
 
     async def delete_account(self, user_id: UUID) -> None:

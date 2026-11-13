@@ -18,8 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, Vali
 
 from app.adapters.llm import LLMError, LLMRateLimitError
 from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
+from app.api.identity import bearer_token, resolve_identity
 from app.core.config import Settings
-from app.core.identity import is_valid_token, participant_id
+from app.core.identity import is_valid_token
 from app.core.security import InvalidInputError, get_client_ip, looks_like_prompt_injection, sanitize_text
 from app.services.reformulation import ReformulationError, ReformulationRefused
 from app.services.rooms import (
@@ -109,6 +110,8 @@ class HelloEvent(BaseModel):
     code: str | None = Field(default=None, max_length=16)
     # Rejoindre en spectateur même s'il reste des places d'intervenant.
     spectate: StrictBool = False
+    # Jeton de session (compte) : facultatif, les WebSockets des navigateurs ne peuvent pas envoyer d'en-tête.
+    session: str | None = Field(default=None, max_length=64)
 
     @field_validator("token")
     @classmethod
@@ -300,12 +303,14 @@ async def create_room(request: Request, body: CreateRoomRequest):
             detail="Limite quotidienne de création de salons atteinte. Revenez demain.",
             headers={"Retry-After": str(limiter.retry_after(ip))},
         )
+    who = await resolve_identity(app, body.participant_token, bearer_token(request))
     try:
         room = await app.state.rooms.create(
             title=title,
             theme_category=body.theme_category,
             visibility=body.visibility,
-            owner_id=participant_id(body.participant_token),
+            owner_id=who.id,
+            owner_aliases=who.aliases,
             max_participants=body.max_participants,
             spectators_allowed=body.spectators_allowed,
             kick_threshold=body.kick_threshold,
@@ -336,7 +341,8 @@ async def delete_room(request: Request, room_id: str, body: DeleteRoomRequest):
     if not ROOM_ID_RE.fullmatch(room_id):
         raise HTTPException(status_code=404, detail="Salon introuvable.")
     try:
-        await request.app.state.rooms.delete(room_id, participant_id(body.participant_token))
+        who = await resolve_identity(request.app, body.participant_token, bearer_token(request))
+        await request.app.state.rooms.delete(room_id, who.id, who.aliases)
     except RoomNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
     except NotAllowedError as exc:
@@ -368,16 +374,19 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
         hello = await _read_hello(ws, settings)
         if hello is None:
             return
-        pid = participant_id(hello.token)
+        who = await resolve_identity(app, hello.token, hello.session)
+        pid = who.id
 
         moderator = room.moderator
+        if moderator is not None and who.aliases:
+            moderator.ledger.link(pid, who.aliases)  # un bannissement suit la personne, connectée ou non
         if moderator is not None and (left := moderator.ledger.ban_remaining(pid)):
             await ws.send_json({"type": "error", "code": "banned", "retry_after": left,
                                 "detail": "Vous êtes temporairement exclu des salons pour non-respect des règles."})
             await ws.close(code=WS_POLICY_VIOLATION)
             return
 
-        if room.requires_code() and not room.is_owner(pid):
+        if room.requires_code() and not (room.is_owner(pid) or any(room.is_owner(a) for a in who.aliases)):
             code_limiter = app.state.code_limiter
             if code_limiter.retry_after(ip) > 0:  # on vérifie AVANT de tester le code : pas d'oracle une fois bloqué
                 await _reject(ws, "too_many_attempts", "Trop de codes erronés. Réessayez plus tard.")
@@ -388,7 +397,7 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
                 return
 
         try:
-            client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED), spectate=hello.spectate)
+            client, replaced = room.join(ws.send_json, pid, close=lambda: ws.close(code=WS_REPLACED), spectate=hello.spectate, aliases=who.aliases)
         except SpectatorsNotAllowedError as exc:
             await _reject(ws, "spectators_not_allowed", str(exc))
             return
@@ -401,7 +410,7 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             return
         if replaced is not None:
             await _evict_replaced(replaced)
-        await ws.send_json(room.snapshot(client.role, pid, client.number))
+        await ws.send_json(room.snapshot(client.role, client.participant_id, client.number))
         await room.broadcast_presence()
         await _receive_loop(ws, room, client, ip, settings)
     except RuntimeError:

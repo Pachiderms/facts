@@ -63,7 +63,18 @@ export function loadHistory(): HistoryEntry[] {
   }
 }
 
-function save(entries: HistoryEntry[]): HistoryEntry[] {
+type Listener = (entries: HistoryEntry[], source: 'local' | 'sync') => void
+const listeners = new Set<Listener>()
+
+/** Notifie chaque écriture (source « sync » : fusion venue du serveur, à ne pas renvoyer au serveur). */
+export function subscribeHistory(listener: Listener): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+function save(entries: HistoryEntry[], source: 'local' | 'sync' = 'local'): HistoryEntry[] {
   // Au-delà de la limite, on retire d'abord les plus anciennes entrées NON épinglées.
   let kept = sorted(entries)
   while (kept.length > HISTORY_MAX) {
@@ -75,7 +86,40 @@ function save(entries: HistoryEntry[]): HistoryEntry[] {
   } catch {
     /* stockage plein ou bloqué : l'historique de cette session seulement */
   }
+  listeners.forEach((l) => l(kept, source))
   return kept
+}
+
+/**
+ * Fusion avec l'historique du compte. Les codes d'accès restent sur l'appareil (jamais envoyés au serveur).
+ * - `union` (première synchronisation de cet appareil) : on garde tout, la visite la plus récente fait foi
+ *   pour le titre et l'épingle, « créateur » l'emporte.
+ * - sinon le serveur fait foi (une suppression faite ailleurs ne ressuscite pas).
+ */
+export function mergeHistory(local: HistoryEntry[], remote: HistoryEntry[], union: boolean): HistoryEntry[] {
+  const localById = new Map(local.map((e) => [e.id, e]))
+  const withCode = (e: HistoryEntry): HistoryEntry => {
+    const code = localById.get(e.id)?.code
+    return code && e.visibility === 'private' ? { ...e, code } : e
+  }
+  if (!union) return sorted(remote.map(withCode)).slice(0, HISTORY_MAX)
+  const merged = new Map<string, HistoryEntry>()
+  for (const e of [...local, ...remote]) {
+    const prev = merged.get(e.id)
+    if (!prev) {
+      merged.set(e.id, e)
+      continue
+    }
+    const newer = e.lastVisit >= prev.lastVisit ? e : prev
+    const code = prev.code ?? e.code
+    merged.set(e.id, { ...newer, owner: prev.owner || e.owner, ...(code ? { code } : {}) })
+  }
+  return sorted([...merged.values()].map(withCode)).slice(0, HISTORY_MAX)
+}
+
+/** Remplace l'historique local par le résultat d'une synchronisation. */
+export function applySynced(entries: HistoryEntry[]): HistoryEntry[] {
+  return save(entries, 'sync')
 }
 
 type Visit = Pick<HistoryEntry, 'id' | 'title' | 'visibility'> & { code?: string; owner?: boolean }

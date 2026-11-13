@@ -140,6 +140,7 @@ class Room:
         if not KICK_THRESHOLD_MIN <= kick_threshold <= KICK_THRESHOLD_MAX:
             raise ValueError("kick_threshold hors limites")
         self.kick_threshold, self._kick_vote_seconds = kick_threshold, kick_vote_seconds
+        self._canon: dict[str, str] = {}  # identité (jeton anonyme ou compte) -> identité canonique de la personne
         self._kicked: set[str] = set()  # identités exclues de CE salon, pour sa durée de vie
         self._pcounts: dict[int, Counter[str]] = {}  # numéro -> verdicts de ses messages (score individuel)
         self._vote: KickVote | None = None
@@ -225,8 +226,26 @@ class Room:
         }
 
     # ---------- accès ----------
+    def canonical(self, pid: str, aliases: tuple[str, ...] | list[str] = ()) -> str:
+        """Identité stable d'une personne dans ce salon, qu'elle soit anonyme, connectée, ou sur un autre appareil.
+
+        La première identité connue du salon sert de référence ; les autres (jeton anonyme avant connexion,
+        compte après) y sont rattachées. Un siège, un numéro, une exclusion ou la propriété du salon
+        survivent donc à une connexion. Table bornée : au-delà, on ne mémorise plus de nouveaux alias.
+        """
+        candidates = [pid, *aliases]
+        known = next((self._canon[c] for c in candidates if c in self._canon), None)
+        canon = known if known is not None else pid
+        for c in candidates:
+            if c not in self._canon and len(self._canon) < MAX_REMEMBERED_PARTICIPANTS * 2:
+                self._canon[c] = canon
+        return canon
+
     def is_owner(self, participant: str) -> bool:
-        return bool(participant) and self.owner_id is not None and secrets.compare_digest(participant, self.owner_id)
+        if not participant or self.owner_id is None:
+            return False
+        mine, owner = self._canon.get(participant, participant), self._canon.get(self.owner_id, self.owner_id)
+        return secrets.compare_digest(mine, owner)
 
     def requires_code(self) -> bool:
         return self.visibility == "private"
@@ -254,6 +273,7 @@ class Room:
         participant_id: str | None = None,
         close: Callable[[], Awaitable[None]] | None = None,
         spectate: bool = False,
+        aliases: tuple[str, ...] = (),
     ) -> tuple[Client, Client | None]:
         """Synchrone et sans `await` : l'attribution des rôles est atomique (pas de course).
 
@@ -264,7 +284,7 @@ class Room:
         `spectate=True` : la personne choisit de regarder, même s'il reste des places d'intervenant
         (elle ne prend alors aucun siège). Sans effet pour qui tient déjà un rôle dans le salon.
         """
-        pid = participant_id or secrets.token_hex(8)
+        pid = self.canonical(participant_id or secrets.token_hex(8), aliases)
         if pid in self._kicked:
             raise KickedError("Vous avez été exclu de ce salon.")
         if self._auto_kick_due(self._numbers.get(pid)):  # exclu automatiquement alors qu'il était absent
@@ -719,14 +739,15 @@ class RoomRegistry:
         """Parmi `ids`, ceux qui existent encore (historique « Mes salons » : repérer les salons expirés)."""
         return [i for i in dict.fromkeys(ids) if i in self._rooms]
 
-    async def delete(self, room_id: str, requester_id: str) -> None:
+    async def delete(self, room_id: str, requester_id: str, aliases: tuple[str, ...] = ()) -> None:
         """Suppression par le créateur, uniquement si personne d'autre n'est connecté."""
         room = self._rooms.get(room_id)
         if room is None:
             raise RoomNotFoundError("Salon introuvable.")
-        if room.permanent or not room.is_owner(requester_id):
+        if room.permanent or not (room.is_owner(requester_id) or any(room.is_owner(a) for a in aliases)):
             raise NotAllowedError("Seul le créateur peut supprimer ce salon.")
-        if any(c.participant_id != requester_id for c in room.clients.values()):
+        me = room.canonical(requester_id, aliases)
+        if any(c.participant_id != me for c in room.clients.values()):
             raise RoomNotEmptyError("D'autres personnes sont connectées : le salon ne peut pas être supprimé maintenant.")
         del self._rooms[room_id]
         await room.shutdown("room_deleted", "Ce salon a été supprimé par son créateur.")
@@ -741,6 +762,7 @@ class RoomRegistry:
         max_participants: int = 2,
         spectators_allowed: bool = True,
         kick_threshold: int = KICK_THRESHOLD_DEFAULT,
+        owner_aliases: tuple[str, ...] = (),
     ) -> Room:
         if self._factory is None:
             raise RuntimeError("Création de salons non configurée.")
@@ -755,6 +777,7 @@ class RoomRegistry:
             max_participants=max_participants, spectators_allowed=spectators_allowed,
             kick_threshold=kick_threshold,
         )
+        room.canonical(owner_id, owner_aliases)  # le créateur reste propriétaire s'il se (dé)connecte ensuite
         self._rooms[room_id] = room
         return room
 
