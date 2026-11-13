@@ -30,7 +30,10 @@ describe('CheckPage', () => {
   const fetchMock = vi.fn()
   beforeEach(() => {
     fetchMock.mockReset()
-    vi.stubGlobal('fetch', fetchMock)
+    // Le quota affiché (UsageNote) est testé à part : ici son appel ne doit pas fausser le décompte des appels.
+    vi.stubGlobal('fetch', (url: RequestInfo | URL, init?: RequestInit) =>
+      String(url).endsWith('/api/v1/usage') ? Promise.reject(new TypeError('hors sujet')) : fetchMock(url, init),
+    )
   })
   afterEach(() => {
     vi.useRealTimers()

@@ -252,3 +252,12 @@ Un compte reste **facultatif** : sans compte, l'identité est l'empreinte du jet
 - **Historique synchronisé** : `GET` / `POST /api/v1/me/history` (POST remplace la liste, le CORS du projet n'autorise que GET et POST), session requise, 20 entrées max, identifiant/titre/visibilité validés et nettoyés. **Jamais de code d'accès** côté serveur. Table `user_rooms` (migration 0003), supprimée avec le compte (cascade) et incluse dans l'export RGPD.
 
 Tests : `test_account_identity.py` (sans base) et `test_account_rooms_api.py` (vraie base), avec contrôle par mutations.
+
+## Quotas, modèle de secours et usage (PR K)
+
+- **`ResilientLLM`** (`app/adapters/llm.py`) enveloppe le fournisseur : sur un **429** du modèle principal, bascule immédiatement sur `FACTS_LLM_FALLBACK_MODEL` (autre modèle = autre quota) et met le principal en pause `FACTS_LLM_PRIMARY_COOLDOWN_SECONDS` (60 s) pour ne pas gaspiller un appel refusé par requête. Un **plafond global** `FACTS_LLM_GLOBAL_DAILY_CALLS` (900 par 24 h glissantes, sous le quota gratuit de 1 000) évite que le fournisseur bloque le compte ; atteint, le secours prend le relais, sinon 503. Aucune relance d'un 429 ; les autres erreurs ne sont pas masquées.
+- **Quota par plan** : sans compte, `FACTS_DAILY_CHECK_LIMIT` (30) par IP ; compte gratuit, `FACTS_ACCOUNT_DAILY_CHECK_LIMIT` (60) par compte, avec un filet par IP à 4 × le plafond anonyme (créer des comptes en série depuis une connexion ne multiplie pas les quotas). Session absente, invalide ou base indisponible : traité comme anonyme. Quotas en mémoire (repartent à zéro au redémarrage).
+- **`GET /api/v1/usage`** (session facultative) : `{plan, checks: {used, limit, remaining}, degraded}`. Lecture seule, aucun identifiant renvoyé. Le site affiche le quota restant et un avertissement discret en mode dégradé.
+- La tier Pro (PR L) s'ajoutera comme un troisième plan avec son propre plafond.
+
+Tests : `test_llm_resilient.py`, `test_usage_quotas.py` (+ contrôle par mutations).

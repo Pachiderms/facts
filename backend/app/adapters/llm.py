@@ -8,10 +8,13 @@ FACTS_LLM_BASE_URL / FACTS_LLM_MODEL / FACTS_LLM_API_KEY, sans toucher au code.
 import asyncio
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 import httpx
+
+from app.core.security import DailyBudget
 
 MAX_RESPONSE_CHARS = 50_000
 
@@ -109,6 +112,59 @@ class OpenAICompatibleLLM:
         if len(content) > MAX_RESPONSE_CHARS:
             raise LLMError("Réponse du LLM anormalement longue.")
         return content
+
+
+class ResilientLLM:
+    """Fournisseur principal + modèle de secours, avec plafond global quotidien d'appels.
+
+    Protège un quota gratuit partagé par tous les visiteurs (Groq : ~1 000 requêtes/jour) :
+      * 429 du principal -> bascule immédiate sur le secours, et le principal est mis en pause
+        (`cooldown_seconds`) pour ne pas gaspiller un appel refusé à chaque requête ;
+      * plafond quotidien atteint -> le principal n'est plus appelé (le fournisseur ne bloque donc pas
+        le compte) ; le secours prend le relais, sinon `LLMRateLimitError` (le service répond 503).
+    Aucune relance automatique d'un 429 : le secours est un autre modèle, donc un autre quota.
+    """
+
+    def __init__(
+        self,
+        primary: LLMProvider,
+        fallback: LLMProvider | None = None,
+        *,
+        daily_calls: int = 900,
+        cooldown_seconds: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._primary, self._fallback = primary, fallback
+        self._budget = DailyBudget(daily_calls, clock=clock)
+        self._cooldown, self._clock = cooldown_seconds, clock
+        self._paused_until = 0.0
+
+    @property
+    def degraded(self) -> bool:
+        """Vrai quand le principal n'est plus appelé (pause après un 429 ou plafond du jour atteint)."""
+        return self._clock() < self._paused_until or self._budget.remaining() < 1
+
+    async def aclose(self) -> None:
+        for provider in (self._primary, self._fallback):
+            close = getattr(provider, "aclose", None)
+            if close is not None:
+                await close()
+
+    async def complete(
+        self, system: str, user: str, *, json_mode: bool = False, max_tokens: int = 1200, temperature: float = 0.0
+    ) -> str:
+        kw: dict[str, Any] = {"json_mode": json_mode, "max_tokens": max_tokens, "temperature": temperature}
+        if not self.degraded:
+            self._budget.spend(1)
+            try:
+                return await self._primary.complete(system, user, **kw)
+            except LLMRateLimitError:
+                self._paused_until = self._clock() + self._cooldown
+                if self._fallback is None:
+                    raise
+        if self._fallback is None:
+            raise LLMRateLimitError("Plafond quotidien d'appels LLM atteint.")
+        return await self._fallback.complete(system, user, **kw)
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)

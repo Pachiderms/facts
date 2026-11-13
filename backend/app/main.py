@@ -11,11 +11,12 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.adapters.llm import OpenAICompatibleLLM
+from app.adapters.llm import OpenAICompatibleLLM, ResilientLLM
 from app.adapters.stt import GroqWhisper, SpeechToText
 from app.adapters.search_chain import FallbackSearch, build_search_chain
 from app.api import auth as auth_api
 from app.api import history as history_api
+from app.api import usage as usage_api
 from app.api import check as check_api
 from app.api.deps import enforce_read_rate_limit
 from app.api import rooms as rooms_api
@@ -43,7 +44,7 @@ SECURITY_HEADERS = {
 }
 
 
-def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibleLLM, FallbackSearch]:
+def build_service(settings: Settings) -> tuple[FactCheckService, ResilientLLM, FallbackSearch]:
     local = any(h in settings.llm_base_url for h in ("localhost", "127.0.0.1"))
     if not settings.llm_api_key and not local:
         raise RuntimeError("FACTS_LLM_API_KEY manquante (obligatoire pour un fournisseur LLM distant).")
@@ -53,6 +54,20 @@ def build_service(settings: Settings) -> tuple[FactCheckService, OpenAICompatibl
         api_key=settings.llm_api_key,
         timeout_seconds=settings.llm_timeout_seconds,
         reasoning_effort=settings.llm_reasoning_effort,
+    )
+    fallback = None
+    if settings.llm_fallback_model.strip():
+        fallback = OpenAICompatibleLLM(
+            base_url=settings.llm_fallback_base_url or settings.llm_base_url,
+            model=settings.llm_fallback_model.strip(),
+            api_key=settings.llm_fallback_api_key or settings.llm_api_key,
+            timeout_seconds=settings.llm_timeout_seconds,
+            reasoning_effort=settings.llm_fallback_reasoning_effort or settings.llm_reasoning_effort,
+        )
+    llm = ResilientLLM(
+        llm, fallback,
+        daily_calls=settings.llm_global_daily_calls if settings.llm_global_daily_calls > 0 else 10**9,
+        cooldown_seconds=settings.llm_primary_cooldown_seconds,
     )
     search = build_search_chain(settings)
     retriever = Retriever(search, max_results=settings.search_max_results)
@@ -96,6 +111,7 @@ def create_app(
         llm = search = None
         if app.state.service is None:
             app.state.service, llm, search = build_service(settings)
+            app.state.llm = llm
             if app.state.reformulator is None:
                 app.state.reformulator = build_reformulator(settings, llm)
         if app.state.rooms is None:
@@ -158,6 +174,9 @@ def create_app(
     app.state.ws_connections = Counter()  # connexions WebSocket ouvertes, par IP
     app.state.ws_limiter = SlidingWindowRateLimiter(settings.ws_messages_per_minute, 60)
     app.state.daily_check_limiter = SlidingWindowRateLimiter(settings.daily_check_limit, 86_400)
+    app.state.account_check_limiter = SlidingWindowRateLimiter(settings.account_daily_check_limit, 86_400)
+    app.state.ip_backstop_limiter = SlidingWindowRateLimiter(settings.daily_check_limit * 4, 86_400)
+    app.state.llm = None
     app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
     app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
     app.state.report_review_limiter = SlidingWindowRateLimiter(settings.daily_report_review_limit, 86_400)
@@ -222,6 +241,7 @@ def create_app(
     app.include_router(voice_api.router)
     app.include_router(auth_api.router)
     app.include_router(history_api.router)
+    app.include_router(usage_api.router)
     return app
 
 
