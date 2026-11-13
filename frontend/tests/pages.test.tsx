@@ -739,3 +739,79 @@ describe('RoomPage : numéros stables (scénario du retour de B)', () => {
     expect(screen.queryByText('absent')).not.toBeInTheDocument()
   })
 })
+
+describe('ArenaPage : Rejoindre un salon', () => {
+  beforeEach(() => {
+    hooks.useRooms.mockReturnValue({ rooms: [], error: null })
+    window.location.hash = '#/arena'
+    sessionStorage.clear()
+  })
+
+  const openJoin = async () => {
+    render(<ArenaPage />)
+    await userEvent.click(screen.getByRole('button', { name: /Rejoindre un salon/ }))
+  }
+
+  it('deux boutons distincts ; un seul panneau ouvert à la fois', async () => {
+    render(<ArenaPage />)
+    expect(screen.getByRole('button', { name: /Créer un salon/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Rejoindre un salon/ }))
+    expect(screen.getByRole('form', { name: 'Rejoindre un salon' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Créer un salon/ }))
+    expect(screen.getByRole('form', { name: 'Créer un salon' })).toBeInTheDocument()
+    expect(screen.queryByRole('form', { name: 'Rejoindre un salon' })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Rejoindre un salon/ }))
+    expect(screen.queryByRole('form', { name: 'Créer un salon' })).not.toBeInTheDocument()
+  })
+
+  it('salon + code : mémorise le code pour l’onglet et ouvre le salon', async () => {
+    await openJoin()
+    await userEvent.type(screen.getByLabelText(/Identifiant du salon/), 'Revenu-AB12')
+    await userEvent.type(screen.getByLabelText(/Code d’accès/), 'k7x9')
+    await userEvent.click(screen.getByRole('button', { name: 'Rejoindre' }))
+    expect(window.location.hash).toBe('#/arena/revenu-ab12')
+    expect(sessionStorage.getItem('facts.code.revenu-ab12')).toBe('K7X9')
+  })
+
+  it('lien d’invitation collé : id et code extraits', async () => {
+    await openJoin()
+    await userEvent.type(screen.getByLabelText(/Identifiant du salon/), 'https://cafaitdebat.fr/#/arena/salon-x?code=ZZ11')
+    await userEvent.click(screen.getByRole('button', { name: 'Rejoindre' }))
+    expect(window.location.hash).toBe('#/arena/salon-x')
+    expect(sessionStorage.getItem('facts.code.salon-x')).toBe('ZZ11')
+  })
+
+  it('sans code : aucune valeur stockée', async () => {
+    await openJoin()
+    await userEvent.type(screen.getByLabelText(/Identifiant du salon/), 'public-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Rejoindre' }))
+    expect(window.location.hash).toBe('#/arena/public-1')
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('saisie invalide : message, pas de navigation, rien de stocké', async () => {
+    await openJoin()
+    await userEvent.type(screen.getByLabelText(/Identifiant du salon/), 'pas valide <b>')
+    await userEvent.type(screen.getByLabelText(/Code d’accès/), 'AB12')
+    await userEvent.click(screen.getByRole('button', { name: 'Rejoindre' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Identifiant de salon invalide.')
+    expect(window.location.hash).toBe('#/arena')
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it('code invalide : message dédié', async () => {
+    await openJoin()
+    await userEvent.type(screen.getByLabelText(/Identifiant du salon/), 'salon-ok')
+    await userEvent.type(screen.getByLabelText(/Code d’accès/), 'a b!')
+    await userEvent.click(screen.getByRole('button', { name: 'Rejoindre' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Code invalide')
+    expect(window.location.hash).toBe('#/arena')
+  })
+
+  it('le bouton est désactivé tant que l’identifiant est vide ; Annuler referme', async () => {
+    await openJoin()
+    expect(screen.getByRole('button', { name: 'Rejoindre' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(screen.queryByRole('form', { name: 'Rejoindre un salon' })).not.toBeInTheDocument()
+  })
+})

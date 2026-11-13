@@ -38,3 +38,30 @@ export function inviteUrl(id: string, code?: string): string {
   const base = `${window.location.origin}${window.location.pathname}${roomHref(id)}`
   return code ? `${base}?code=${encodeURIComponent(code)}` : base
 }
+
+/**
+ * Saisie « Rejoindre un salon » : un identifiant (`mon-salon`) ou un lien d'invitation collé tel quel
+ * (`https://…/#/arena/mon-salon?code=AB12`). Renvoie `null` si rien d'exploitable.
+ */
+export function parseJoinInput(raw: string, codeField = ''): { id: string; code?: string } | null {
+  const text = raw.trim()
+  if (!text) return null
+  let id: string
+  let code: string | undefined
+  const hashAt = text.indexOf('#')
+  if (hashAt >= 0) {
+    const route = parseHash(text.slice(hashAt))
+    if (route.name !== 'room') return null
+    id = route.id
+    code = route.code
+  } else {
+    id = text.toLowerCase()
+    if (!ROOM_ID_RE.test(id)) return null
+  }
+  const typed = codeField.trim()
+  if (typed) {
+    if (!INVITE_CODE_RE.test(typed)) return null
+    code = typed.toUpperCase()
+  }
+  return code ? { id, code } : { id }
+}

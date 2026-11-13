@@ -14,20 +14,27 @@ export function Header({ page, onNavigate }: { page: PageId; onNavigate: (page: 
     <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white shadow-sm">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center space-x-3">
-          <div
-            aria-hidden="true"
-            className="flex h-9 min-w-9 items-center justify-center rounded-lg bg-neutral-900 px-1.5 font-mono text-[13px] font-black tracking-tight text-white shadow-md"
+          <button
+            type="button"
+            onClick={() => onNavigate('check')}
+            aria-label="CaFaitDebat, retour à l’accueil (Vérificateur IA)"
+            className="flex items-center space-x-3 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900"
           >
-            CFD
-          </div>
-          <div className="flex flex-col leading-tight">
-            <span className="hidden font-mono text-xl font-extrabold tracking-tight text-neutral-900 sm:block">
-              CaFaitDebat<span className="text-neutral-400">.</span>
+            <span
+              aria-hidden="true"
+              className="flex h-9 min-w-9 items-center justify-center rounded-lg bg-neutral-900 px-1.5 font-mono text-[13px] font-black tracking-tight text-white shadow-md"
+            >
+              CFD
             </span>
-            <span className="hidden text-[10px] font-medium uppercase tracking-wider text-neutral-500 sm:block">
-              Vérification de faits &amp; arène neutre
+            <span className="flex flex-col text-left leading-tight">
+              <span className="hidden font-mono text-xl font-extrabold tracking-tight text-neutral-900 sm:block">
+                CaFaitDebat<span className="text-neutral-400">.</span>
+              </span>
+              <span className="hidden text-[10px] font-medium uppercase tracking-wider text-neutral-500 sm:block">
+                Vérification de faits &amp; arène neutre
+              </span>
             </span>
-          </div>
+          </button>
         </div>
 
         <nav aria-label="Navigation principale" className="flex items-center rounded-xl border border-neutral-200 bg-neutral-100 p-1">

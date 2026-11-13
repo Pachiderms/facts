@@ -1,7 +1,8 @@
-import { Plus, Search } from 'lucide-react'
+import { LogIn, Plus, Search } from 'lucide-react'
 import { UsageNote } from '../components/check/UsageNote'
 import { useId, useState } from 'react'
 import { CreateRoomForm } from '../components/arena/CreateRoomForm'
+import { JoinRoomForm } from '../components/arena/JoinRoomForm'
 import { MyRooms } from '../components/arena/MyRooms'
 import { RoomList } from '../components/arena/RoomList'
 import { useDebounced } from '../hooks/useDebounced'
@@ -12,7 +13,8 @@ import { roomHref } from '../lib/route'
 /** Liste des salons, recherche (nom ou ID) et création. On débat dans la page d'un salon. */
 export function ArenaPage() {
   const [query, setQuery] = useState('')
-  const [creating, setCreating] = useState(false)
+  const [panel, setPanel] = useState<'create' | 'join' | null>(null)
+  const toggle = (which: 'create' | 'join') => setPanel((p) => (p === which ? null : which))
   const search = useDebounced(query.trim(), 300)
   const { rooms, error } = useRooms(search)
   const lookup = useRoomLookup(search.toLowerCase())
@@ -32,17 +34,28 @@ export function ArenaPage() {
           </p>
           <UsageNote kind="debate" refreshKey={null} />
         </div>
-        <button
-          type="button"
-          onClick={() => setCreating((v) => !v)}
-          aria-expanded={creating}
-          className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-neutral-900 px-4 py-2.5 text-xs font-bold text-white shadow transition hover:bg-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" /> Créer un salon
-        </button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => toggle('create')}
+            aria-expanded={panel === 'create'}
+            className="flex items-center justify-center gap-2 rounded-xl bg-neutral-900 px-4 py-2.5 text-xs font-bold text-white shadow transition hover:bg-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" /> Créer un salon
+          </button>
+          <button
+            type="button"
+            onClick={() => toggle('join')}
+            aria-expanded={panel === 'join'}
+            className="flex items-center justify-center gap-2 rounded-xl border border-neutral-300 bg-white px-4 py-2.5 text-xs font-bold text-neutral-900 shadow-sm transition hover:bg-neutral-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900 focus-visible:ring-offset-2"
+          >
+            <LogIn className="h-4 w-4" aria-hidden="true" /> Rejoindre un salon
+          </button>
+        </div>
       </div>
 
-      {creating && <CreateRoomForm onCancel={() => setCreating(false)} />}
+      {panel === 'create' && <CreateRoomForm onCancel={() => setPanel(null)} />}
+      {panel === 'join' && <JoinRoomForm onCancel={() => setPanel(null)} />}
 
       <MyRooms />
 
