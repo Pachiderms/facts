@@ -294,3 +294,13 @@ describe('Composer : numéro de participant', () => {
     expect(screen.getByText('Vous êtes Participant 2')).toBeInTheDocument()
   })
 })
+
+describe('Pied de page', () => {
+  it('n’expose aucun lien vers le code source', async () => {
+    const { Footer } = await import('../src/components/Layout')
+    const { container } = render(<Footer />)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.textContent).not.toMatch(/code source|github/i)
+    expect(container.textContent).toMatch(/consultez toujours les sources/)
+  })
+})
