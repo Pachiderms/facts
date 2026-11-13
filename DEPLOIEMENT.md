@@ -148,6 +148,19 @@ Le site et l'API peuvent garder leurs adresses gratuites ; un domaine à vous le
 10. **Ensuite** : retirer les anciennes origines (`workers.dev`) de CORS et de Google ; activer le DNSSEC dans Cloudflare et recopier l'enregistrement DS chez le registrar.
 
 
+## Mesurer les coûts réels (bêta → V1)
+
+La bêta sert à savoir **combien coûte vraiment** une vérification avant de fixer un prix. Chaque appel au modèle (jetons en entrée et en sortie) et chaque crédit de recherche est compté, par jour, par type d'action (`check` = vérificateur, `room_check` = message de salon, `moderation`, `triage`, `reformulation`) et par modèle. **Aucune donnée personnelle** n'est stockée : ni identité, ni IP, ni texte. Il faut la base de données (table `cost_usage`, créée par la migration 0006).
+
+1. Sur Render, créer `FACTS_ADMIN_TOKEN` avec une valeur aléatoire de 32 caractères ou plus (`openssl rand -hex 32`). Sans elle, l'endpoint n'existe pas (réponse 404).
+2. Renseigner `FACTS_COST_PRICES` avec les tarifs publics de vos fournisseurs, en euros (JSON) :
+   `{"llm": {"openai/gpt-oss-120b": [0.15, 0.60]}, "search": {"tavily": 0.008}}`
+   (`llm` : prix par million de jetons, [entrée, sortie] ; `search` : prix par crédit). Les prix ne sont pas stockés : corriger un tarif corrige aussi le passé. Les chiffres ci-dessus sont des exemples à remplacer par les tarifs réels.
+3. Lire les coûts : `curl -H "Authorization: Bearer <jeton>" "https://api.<votre-domaine>/api/v1/admin/costs?days=7"`. La réponse donne, par action, le coût total et le **coût moyen par action** (`cost_per_action_eur`), ainsi que la liste `unpriced` des modèles utilisés sans tarif (leur coût compte 0 : renseignez-les).
+4. `FACTS_PROFILE` vaut `beta` aujourd'hui ; passer à `v1` au moment de basculer sur les offres au crédit sépare les mesures des deux périodes.
+
+Les compteurs sont écrits toutes les 60 secondes et à l'arrêt du serveur ; un redémarrage brutal peut perdre au plus une minute de mesures. Après trois essais de jeton faux depuis une même IP, l'endpoint répond 429.
+
 ## Paiement Pro (Lemon Squeezy) : à n'ouvrir qu'avec une micro-entreprise
 
 Le code est livré **éteint** (`FACTS_PAYMENTS_ENABLED=false`) : la page Tarifs affiche « Bientôt disponible », le lien de paiement et le webhook refusent tout. Rien n'est encaissé tant que vous ne l'allumez pas.

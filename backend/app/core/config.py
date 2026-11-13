@@ -4,6 +4,7 @@ Aucun secret n'est codé en dur : la clé LLM vient de FACTS_LLM_API_KEY.
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -105,6 +106,14 @@ class Settings(BaseSettings):
     llm_global_daily_calls: int = 900
     llm_primary_cooldown_seconds: float = 60.0
 
+    # Versioning : « beta » (gratuit, sert à MESURER) ou « v1 » (fournisseurs au crédit). Étiquette chaque ligne de coût.
+    profile: Literal["beta", "v1"] = "beta"
+    # Mesure des coûts. Endpoint /api/v1/admin/costs fermé (404) sans jeton ; jeton long et aléatoire obligatoire.
+    admin_token: SecretStr = SecretStr("")
+    cost_flush_seconds: float = 60.0
+    # Tarifs en euros, JSON : {"llm": {"modèle": [€ par million de jetons en entrée, en sortie]}, "search": {"tavily": € par crédit}}
+    cost_prices: str = ""
+
     # Saisie vocale (Groq Whisper). Désactivée sans clé. Offre gratuite Groq : ~28 800 s d'audio par jour.
     stt_enabled: bool = True
     stt_base_url: str = "https://api.groq.com/openai/v1"
@@ -143,6 +152,14 @@ class Settings(BaseSettings):
     room_code_window_seconds: int = 600  # ... par IP sur cette fenêtre (anti-force brute)
 
     @model_validator(mode="after")
+    def _admin_and_prices_are_sound(self) -> "Settings":
+        token = self.admin_token.get_secret_value()
+        if token and len(token) < 32:
+            raise ValueError("FACTS_ADMIN_TOKEN : 32 caractères minimum (ex. `openssl rand -hex 32`)")
+        parse_prices(self.cost_prices)  # refuse un JSON invalide au démarrage plutôt que des coûts faux en silence
+        return self
+
+    @model_validator(mode="after")
     def _payments_need_a_complete_setup(self) -> "Settings":
         # Activer le paiement avec une configuration incomplète : refus au démarrage, pas une panne silencieuse.
         if self.payments_enabled:
@@ -169,6 +186,35 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+
+def parse_prices(raw: str) -> dict[str, dict[str, list[float]]]:
+    """Tarifs normalisés : {"llm": {modèle: [entrée, sortie]}, "search": {moteur: [par crédit]}}. Vide = aucun tarif."""
+    import json
+    import math
+
+    if not raw.strip():
+        return {"llm": {}, "search": {}}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise ValueError("FACTS_COST_PRICES : JSON invalide") from None
+    if not isinstance(data, dict) or set(data) - {"llm", "search"}:
+        raise ValueError('FACTS_COST_PRICES : clés autorisées « llm » et « search »')
+
+    def number(v: object) -> float:
+        if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or v < 0:
+            raise ValueError("FACTS_COST_PRICES : les prix sont des nombres positifs ou nuls")
+        return float(v)
+
+    out: dict[str, dict[str, list[float]]] = {"llm": {}, "search": {}}
+    for model, pair in (data.get("llm") or {}).items():
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise ValueError("FACTS_COST_PRICES : « llm » attend [entrée, sortie] par modèle")
+        out["llm"][str(model)] = [number(pair[0]), number(pair[1])]
+    for provider, price in (data.get("search") or {}).items():
+        out["search"][str(provider)] = [number(price)]
+    return out
 
 
 @lru_cache

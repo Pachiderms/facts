@@ -162,3 +162,11 @@ def test_payments_are_off_in_the_blueprint_and_their_secrets_stay_out_of_the_rep
     for secret in ("FACTS_LEMONSQUEEZY_WEBHOOK_SECRET", "FACTS_LEMONSQUEEZY_CHECKOUT_URL"):
         block = RENDER.split(f"key: {secret}", 1)[1].split("- key:", 1)[0]
         assert "sync: false" in block and "value:" not in block
+
+
+def test_admin_token_and_prices_stay_out_of_the_repo_and_the_profile_is_beta():
+    for secret in ("FACTS_ADMIN_TOKEN", "FACTS_COST_PRICES"):
+        block = RENDER.split(f"key: {secret}", 1)[1].split("- key:", 1)[0]
+        assert "sync: false" in block and "value:" not in block
+    profile = RENDER.split("key: FACTS_PROFILE", 1)[1].split("- key:", 1)[0]
+    assert "value: beta" in profile

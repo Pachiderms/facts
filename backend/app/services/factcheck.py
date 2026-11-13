@@ -29,6 +29,7 @@ from app.services.prompts import (
     build_query_user_prompt,
 )
 from app.services.retrieval import Retriever
+from app.core.metering import default_operation
 
 logger = logging.getLogger("facts.factcheck")
 
@@ -109,6 +110,10 @@ class FactCheckService:
         return f"{int(institutional_filter)}:{ctx}:{assertion.casefold()}"
 
     async def check(self, assertion: str, institutional_filter: bool = True, context: str | None = None) -> CheckResponse:
+        with default_operation("check"):  # étiquette de coût, sans écraser celle d'un appelant (ex. « room_check »)
+            return await self._check(assertion, institutional_filter, context)
+
+    async def _check(self, assertion: str, institutional_filter: bool, context: str | None) -> CheckResponse:
         clean = sanitize_text(assertion, self._max_chars)
         if looks_like_prompt_injection(assertion) or looks_like_prompt_injection(clean):
             raise PromptInjectionError("Assertion refusée : elle ne ressemble pas à une affirmation vérifiable.")

@@ -26,6 +26,9 @@ from app.db.engine import Database
 from app.core.config import Settings, get_settings
 from app.core.security import DailyBudget, SlidingWindowRateLimiter, get_client_ip
 from app.api import billing as billing_api
+from app.api import admin as admin_api
+from app.core import metering
+from app.services.costs import CostRecorder
 from app.services.accounts import AccountService
 from app.services.billing import BillingService
 from app.services.history import HistoryService
@@ -142,12 +145,23 @@ def create_app(
             app.state.history = HistoryService(app.state.db)
         if app.state.db is not None and isinstance(app.state.quota_policy.store, MemoryQuotas):
             app.state.quota_policy.store = PostgresQuotas(app.state.db, fallback=app.state.quota_policy.store)
+        cost_task = None
+        if app.state.db is not None:
+            meter = metering.UsageMeter(settings.profile)
+            app.state.costs = CostRecorder(app.state.db, meter)
+            metering.set_meter(meter)
+            cost_task = asyncio.create_task(app.state.costs.run(settings.cost_flush_seconds))
         stt_owned = None
         if app.state.stt is None and settings.voice_available:
             app.state.stt = stt_owned = GroqWhisper(
                 settings.stt_base_url, settings.stt_key, settings.stt_model, timeout_seconds=settings.stt_timeout_seconds
             )
         yield
+        if cost_task is not None:
+            cost_task.cancel()
+            await asyncio.gather(cost_task, return_exceptions=True)
+            await app.state.costs.flush()  # derniers compteurs avant l'arrêt (Render endort le service après 15 min)
+            metering.set_meter(None)
         if stt_owned is not None:
             await stt_owned.aclose()
         if google_owned is not None:
@@ -188,6 +202,7 @@ def create_app(
         logging.getLogger("facts.quotas").warning("FACTS_QUOTA_SALT absent : les quotas durables changent de clé à chaque démarrage")
     app.state.quota_policy = QuotaPolicy(PostgresQuotas(db) if db is not None else MemoryQuotas(), settings, salt)
     app.state.llm = None
+    app.state.costs = None
     app.state.daily_ws_limiter = SlidingWindowRateLimiter(settings.daily_ws_message_limit, 86_400)
     app.state.daily_room_limiter = SlidingWindowRateLimiter(settings.daily_room_creation_limit, 86_400)
     app.state.report_review_limiter = SlidingWindowRateLimiter(settings.daily_report_review_limit, 86_400)
@@ -269,6 +284,7 @@ def create_app(
     app.include_router(history_api.router)
     app.include_router(usage_api.router)
     app.include_router(billing_api.router)
+    app.include_router(admin_api.router)
     return app
 
 

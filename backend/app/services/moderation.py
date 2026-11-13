@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from app.adapters.llm import LLMError, LLMProvider, parse_json_object
 from app.core.security import looks_like_prompt_injection
 from app.services import moderation_terms as terms
+from app.core.metering import operation
 
 logger = logging.getLogger("facts.moderation")
 
@@ -278,10 +279,11 @@ class Moderator:
             try:
                 # Marge pour la « réflexion » des modèles raisonneurs (gpt-oss) : avec 60 jetons la réponse
                 # sortait vide ou coupée, donc invalide.
-                raw = await asyncio.wait_for(
-                    self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=LLM_MAX_TOKENS, temperature=0.0),
-                    self._timeout,
-                )
+                with operation("moderation", count_action=attempt == 1):
+                    raw = await asyncio.wait_for(
+                        self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=LLM_MAX_TOKENS, temperature=0.0),
+                        self._timeout,
+                    )
                 out = _LLMVerdict.model_validate(parse_json_object(raw))
                 break
             except asyncio.TimeoutError:

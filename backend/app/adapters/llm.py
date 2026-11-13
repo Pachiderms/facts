@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from app.core.metering import record_llm
 from app.core.security import DailyBudget
 
 MAX_RESPONSE_CHARS = 50_000
@@ -73,8 +74,23 @@ class OpenAICompatibleLLM:
             payload["reasoning_effort"] = self._reasoning_effort
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
 
-        response = await self._post_with_retry(payload, headers)
-        return self._extract_content(response)
+        try:
+            response = await self._post_with_retry(payload, headers)
+            content = self._extract_content(response)
+        except LLMError:
+            record_llm(self._model, error=True)
+            raise
+        usage = self._usage(response)
+        record_llm(self._model, usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        return content
+
+    @staticmethod
+    def _usage(response: httpx.Response) -> dict[str, Any]:
+        try:
+            usage = response.json().get("usage")
+        except (ValueError, AttributeError):
+            return {}
+        return usage if isinstance(usage, dict) else {}
 
     async def _post_with_retry(self, payload: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
         for attempt in range(self._max_retries + 1):

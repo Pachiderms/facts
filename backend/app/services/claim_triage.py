@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.adapters.llm import LLMError, LLMProvider, LLMRateLimitError, parse_json_object
 from app.core.security import InvalidInputError, looks_like_prompt_injection, sanitize_text
+from app.core.metering import operation
 
 logger = logging.getLogger("facts.triage")
 
@@ -125,10 +126,11 @@ class ClaimExtractor:
         answer: _TriageAnswer | None = None
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                raw = await asyncio.wait_for(
-                    self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=LLM_MAX_TOKENS, temperature=0.0),
-                    self._timeout,
-                )
+                with operation("triage", count_action=attempt == 1):
+                    raw = await asyncio.wait_for(
+                        self._llm.complete(SYSTEM_PROMPT, user_prompt, json_mode=True, max_tokens=LLM_MAX_TOKENS, temperature=0.0),
+                        self._timeout,
+                    )
                 answer = _TriageAnswer.model_validate(parse_json_object(raw))
                 break
             except asyncio.TimeoutError:
