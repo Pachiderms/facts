@@ -46,6 +46,12 @@ async def optional_user(request: Request):
         return None
 
 
+async def account_plan(app, user_id) -> str:
+    """« pro » pour un abonné actif, « free » sinon (et si le paiement n'est pas activé ou la base indisponible)."""
+    billing = getattr(app.state, "billing", None)
+    return await billing.plan_of(user_id) if billing is not None else "free"
+
+
 async def quota_who(request: Request):
     """Qui consomme : compte (session valide) ou visiteur anonyme (IP). Voir QuotaPolicy."""
     state = request.app.state
@@ -53,7 +59,8 @@ async def quota_who(request: Request):
     user = await optional_user(request)
     if user is None:
         return state.quota_policy.anonymous(ip)
-    return state.quota_policy.account(account_identity(user.id), ip)  # même clé que le débat (WebSocket)
+    plan = await account_plan(request.app, user.id)
+    return state.quota_policy.account(account_identity(user.id), ip, plan)  # même clé que le débat (WebSocket)
 
 
 async def enforce_daily_check_limit(request: Request) -> None:

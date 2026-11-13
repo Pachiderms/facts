@@ -1,5 +1,6 @@
 import { Bot, Flame, Scale } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { legalHref, PRICING_HREF } from '../lib/route'
 import { AccountMenu } from './AccountMenu'
 
 export type PageId = 'check' | 'arena'
@@ -9,7 +10,7 @@ const TABS: { id: PageId; label: string; short: string; icon: typeof Bot }[] = [
   { id: 'arena', label: 'Arène de débat', short: 'Arène', icon: Flame },
 ]
 
-export function Header({ page, onNavigate }: { page: PageId; onNavigate: (page: PageId) => void }) {
+export function Header({ page, onNavigate }: { page: PageId | null; onNavigate: (page: PageId) => void }) {
   return (
     <header className="sticky top-0 z-50 border-b border-neutral-200 bg-white shadow-sm">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
@@ -80,6 +81,18 @@ export function Footer() {
           <span className="font-bold text-neutral-900">CaFaitDebat.</span> Vérification assistée par IA. Les verdicts peuvent comporter des
           erreurs : consultez toujours les sources.
         </p>
+        <nav aria-label="Informations" className="mt-3 flex flex-wrap gap-x-4 gap-y-1 font-medium">
+          {[
+            ['Tarifs', PRICING_HREF],
+            ['Mentions légales', legalHref('mentions')],
+            ['Confidentialité', legalHref('confidentialite')],
+            ['CGU', legalHref('cgu')],
+          ].map(([label, href]) => (
+            <a key={href} href={href} className="underline-offset-2 hover:text-neutral-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900">
+              {label}
+            </a>
+          ))}
+        </nav>
       </div>
     </footer>
   )

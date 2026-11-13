@@ -5,7 +5,7 @@ Aucun secret n'est codé en dur : la clé LLM vient de FACTS_LLM_API_KEY.
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,11 +66,21 @@ class Settings(BaseSettings):
     # Plafonds par visiteur et par jour (protègent les crédits de recherche et les quotas LLM)
     daily_check_limit: int = 30  # visiteur sans compte, par IP
     account_daily_check_limit: int = 60  # compte gratuit, par compte (l'IP garde un plafond large : daily_check_limit x 4)
+    pro_daily_check_limit: int = 250  # abonné Pro, par compte
+    pro_debate_daily_checks: int = 400  # abonné Pro, par compte (le budget global du débat reste commun à tous)
     daily_ws_message_limit: int = 200
     # Messages de débat qui déclenchent une vérification (appel LLM + recherche), par jour UTC.
     debate_daily_checks: int = 40  # sans compte, par IP
     account_debate_daily_checks: int = 120  # compte gratuit, par compte
     debate_global_daily_checks: int = 300  # tous salons : le reste du plafond d'appels LLM est réservé au chatbot
+    # Paiement (Lemon Squeezy, marchand de référence : il gère la TVA). DÉSACTIVÉ tant que payments_enabled est faux :
+    # aucun paiement n'est proposé et le webhook refuse tout. À activer après la création de la micro-entreprise.
+    payments_enabled: bool = False
+    lemonsqueezy_webhook_secret: SecretStr = SecretStr("")  # secret de signature du webhook (min. 16 caractères)
+    lemonsqueezy_checkout_url: str = ""  # lien de paiement du produit Pro (https://<boutique>.lemonsqueezy.com/checkout/buy/<id>)
+    pro_price_label: str = ""  # libellé affiché, ex. « 5 € / mois » (le prix réel est fixé chez le prestataire)
+    billing_grace_days: int = 3  # tolérance après la fin de période (retard de paiement) avant de repasser en gratuit
+
     # Sel des empreintes de quotas (IP jamais stockées en clair). DOIT être fixe en production avec une base :
     # vide = sel aléatoire à chaque démarrage (quotas durables inopérants).
     quota_salt: str = ""
@@ -131,6 +141,18 @@ class Settings(BaseSettings):
     room_title_max_chars: int = 120
     room_code_max_failures: int = 5  # codes faux tolérés ...
     room_code_window_seconds: int = 600  # ... par IP sur cette fenêtre (anti-force brute)
+
+    @model_validator(mode="after")
+    def _payments_need_a_complete_setup(self) -> "Settings":
+        # Activer le paiement avec une configuration incomplète : refus au démarrage, pas une panne silencieuse.
+        if self.payments_enabled:
+            if len(self.lemonsqueezy_webhook_secret.get_secret_value()) < 16:
+                raise ValueError("FACTS_PAYMENTS_ENABLED exige FACTS_LEMONSQUEEZY_WEBHOOK_SECRET (16 caractères minimum)")
+            if not self.lemonsqueezy_checkout_url.startswith("https://"):
+                raise ValueError("FACTS_PAYMENTS_ENABLED exige FACTS_LEMONSQUEEZY_CHECKOUT_URL en https://")
+            if not self.accounts_available:
+                raise ValueError("FACTS_PAYMENTS_ENABLED exige les comptes (base de données + FACTS_GOOGLE_CLIENT_ID)")
+        return self
 
     @property
     def stt_key(self) -> str:

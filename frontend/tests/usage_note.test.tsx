@@ -32,8 +32,13 @@ describe('fetchUsage', () => {
     expect((fetchMock.mock.calls[1]![1] as RequestInit).headers).toMatchObject({ Authorization: `Bearer ${TOKEN}` })
   })
 
+  it('accepte le plan Pro', async () => {
+    fetchMock.mockResolvedValueOnce(json(usage({ plan: 'pro' })))
+    expect((await fetchUsage()).plan).toBe('pro')
+  })
+
   it('rejette une réponse hors contrat', async () => {
-    for (const bad of [{}, usage({ plan: 'pro' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } }), usage({ debate: undefined }), usage({ debate: { used: 1 } })]) {
+    for (const bad of [{}, usage({ plan: 'vip' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } }), usage({ debate: undefined }), usage({ debate: { used: 1 } })]) {
       fetchMock.mockResolvedValueOnce(json(bad))
       await expect(fetchUsage()).rejects.toThrow()
     }

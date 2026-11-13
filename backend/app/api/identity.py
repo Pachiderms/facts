@@ -8,6 +8,7 @@ l'identité anonyme, comme avant l'introduction des comptes.
 
 import logging
 from typing import NamedTuple
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 
@@ -19,6 +20,7 @@ logger = logging.getLogger("facts.identity")
 class Identity(NamedTuple):
     id: str  # identité principale (compte si connecté, sinon empreinte anonyme)
     aliases: tuple[str, ...]  # identités à rattacher (empreinte anonyme du navigateur)
+    user_id: UUID | None = None  # compte connecté (pour retrouver son plan), sinon None
 
 
 def bearer_token(request: Request) -> str:
@@ -38,4 +40,4 @@ async def resolve_identity(app: FastAPI, participant_token: str, session_token: 
         return Identity(anon, ())
     if user is None:
         return Identity(anon, ())
-    return Identity(account_identity(user.id), (anon,))
+    return Identity(account_identity(user.id), (anon,), user.id)

@@ -146,3 +146,22 @@ Le site et l'API peuvent garder leurs adresses gratuites ; un domaine à vous le
 8. **Pinger** : `https://api.domaine.fr/health`.
 9. **Vérifier** : `https://api.domaine.fr/health` ; `/health/ip` (`resolved_ip` = votre adresse publique, sinon ajuster `FACTS_PROXY_HOPS`) ; un salon (WebSocket) ; la connexion Google.
 10. **Ensuite** : retirer les anciennes origines (`workers.dev`) de CORS et de Google ; activer le DNSSEC dans Cloudflare et recopier l'enregistrement DS chez le registrar.
+
+
+## Paiement Pro (Lemon Squeezy) : à n'ouvrir qu'avec une micro-entreprise
+
+Le code est livré **éteint** (`FACTS_PAYMENTS_ENABLED=false`) : la page Tarifs affiche « Bientôt disponible », le lien de paiement et le webhook refusent tout. Rien n'est encaissé tant que vous ne l'allumez pas.
+
+**Avant d'allumer**
+1. Créer la micro-entreprise (guichet unique des formalités, gratuit) et obtenir le SIRET.
+2. Compléter `frontend/src/lib/legal.ts` (nom, adresse, e-mail, SIRET, directeur de la publication). Les champs vides s'affichent « À compléter » sur les pages Mentions légales, Confidentialité et CGU. Faire relire ces textes (ce sont des modèles, pas un avis juridique) et vérifier la région de la base Neon indiquée.
+3. Créer la boutique et le produit « Pro » (abonnement mensuel) chez Lemon Squeezy ; le prix se fixe là-bas. Copier le lien de paiement du produit.
+4. Dans Lemon Squeezy → Settings → Webhooks : URL `https://api.<votre-domaine>/api/v1/billing/webhook`, un secret de 16 caractères minimum, évènements **subscription_created, subscription_updated, subscription_cancelled, subscription_resumed, subscription_expired, subscription_paused, subscription_unpaused**.
+5. Sur Render, renseigner `FACTS_LEMONSQUEEZY_WEBHOOK_SECRET` (le même secret), `FACTS_LEMONSQUEEZY_CHECKOUT_URL`, `FACTS_PRO_PRICE_LABEL` (ex. « 5 € / mois »), puis passer `FACTS_PAYMENTS_ENABLED` à `true`. Le serveur refuse de démarrer si une valeur manque (message explicite dans les journaux).
+6. Tester en **mode test** de Lemon Squeezy (carte de test) : le compte doit passer Pro en quelques secondes ; vérifier aussi la résiliation.
+
+**À savoir**
+- La base migre seule au démarrage (tables `subscriptions` et `billing_events`).
+- Un abonné Pro a des plafonds plus hauts (`FACTS_PRO_DAILY_CHECK_LIMIT`, `FACTS_PRO_DEBATE_DAILY_CHECKS`), mais le budget global du débat et le plafond d'appels LLM restent communs à tous : à surveiller avant de vendre à beaucoup de monde (offre gratuite Groq : ~1 000 appels par jour).
+- Supprimer son compte efface l'abonnement côté serveur mais **ne résilie pas** la facturation chez Lemon Squeezy : l'abonné doit d'abord résilier (lien « Gérer mon abonnement »).
+- Si Render dort, Lemon Squeezy réessaie le webhook plusieurs fois ; chaque livraison est idempotente.

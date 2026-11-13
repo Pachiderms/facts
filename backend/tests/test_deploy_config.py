@@ -154,3 +154,11 @@ def test_render_blueprint_has_no_session_or_google_secret_value():
     block = RENDER.split("FACTS_GOOGLE_CLIENT_ID", 1)[1].split("- key:", 1)[0]
     assert "sync: false" in block and "value:" not in block
     assert "client_secret" not in RENDER.lower()  # le flux « jeton d'identité » n'a besoin d'aucun secret Google
+
+
+def test_payments_are_off_in_the_blueprint_and_their_secrets_stay_out_of_the_repo():
+    flag = RENDER.split("key: FACTS_PAYMENTS_ENABLED", 1)[1].split("- key:", 1)[0]
+    assert 'value: "false"' in flag  # jamais activé par défaut
+    for secret in ("FACTS_LEMONSQUEEZY_WEBHOOK_SECRET", "FACTS_LEMONSQUEEZY_CHECKOUT_URL"):
+        block = RENDER.split(f"key: {secret}", 1)[1].split("- key:", 1)[0]
+        assert "sync: false" in block and "value:" not in block

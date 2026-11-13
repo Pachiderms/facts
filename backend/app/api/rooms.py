@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, TypeAdapter, ValidationError, field_validator
 
 from app.adapters.llm import LLMError, LLMRateLimitError
-from app.api.deps import enforce_rate_limit, enforce_read_rate_limit
+from app.api.deps import account_plan, enforce_rate_limit, enforce_read_rate_limit
 from app.api.identity import bearer_token, resolve_identity
 from app.core.config import Settings
 from app.core.identity import is_valid_token
@@ -413,7 +413,7 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
         await ws.send_json(room.snapshot(client.role, client.participant_id, client.number))
         await room.broadcast_presence()
         quota = app.state.quota_policy
-        who_q = quota.account(who.id, ip) if who.id.startswith("u:") else quota.anonymous(ip)
+        who_q = quota.account(who.id, ip, await account_plan(app, who.user_id)) if who.user_id is not None else quota.anonymous(ip)
         await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_debate(who_q))
     except RuntimeError:
         pass  # socket déjà fermée côté client pendant un envoi
