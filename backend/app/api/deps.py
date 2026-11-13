@@ -2,7 +2,7 @@
 
 from fastapi import HTTPException, Request
 
-from app.core.identity import account_identity
+from app.core.identity import account_identity, is_valid_token, participant_id
 from app.core.security import get_client_ip
 from app.services.factcheck import FactCheckService
 
@@ -52,15 +52,22 @@ async def account_plan(app, user_id) -> str:
     return await billing.plan_of(user_id) if billing is not None else "free"
 
 
+def request_participant(request: Request) -> str | None:
+    """Empreinte du jeton anonyme du navigateur (en-tête facultatif), pour suivre la personne entre anonyme et compte."""
+    token = request.headers.get("x-participant-token", "")
+    return participant_id(token) if is_valid_token(token) else None
+
+
 async def quota_who(request: Request):
     """Qui consomme : compte (session valide) ou visiteur anonyme (IP). Voir QuotaPolicy."""
     state = request.app.state
+    participant = request_participant(request)
     ip = get_client_ip(request, state.settings.trust_proxy_headers, state.settings.proxy_hops)
     user = await optional_user(request)
     if user is None:
-        return state.quota_policy.anonymous(ip)
+        return state.quota_policy.anonymous(ip, participant)
     plan = await account_plan(request.app, user.id)
-    return state.quota_policy.account(account_identity(user.id), ip, plan)  # même clé que le débat (WebSocket)
+    return state.quota_policy.account(account_identity(user.id), ip, plan, participant)  # même clé que le débat (WebSocket)
 
 
 async def enforce_daily_check_limit(request: Request) -> None:

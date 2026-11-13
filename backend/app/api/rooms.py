@@ -413,7 +413,10 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
         await ws.send_json(room.snapshot(client.role, client.participant_id, client.number))
         await room.broadcast_presence()
         quota = app.state.quota_policy
-        who_q = quota.account(who.id, ip, await account_plan(app, who.user_id)) if who.user_id is not None else quota.anonymous(ip)
+        if who.user_id is not None:
+            who_q = quota.account(who.id, ip, await account_plan(app, who.user_id), who.aliases[0] if who.aliases else None)
+        else:
+            who_q = quota.anonymous(ip, who.id)
         await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_debate(who_q))
     except RuntimeError:
         pass  # socket déjà fermée côté client pendant un envoi
