@@ -96,9 +96,9 @@ class PlanService:
             user_id = (await s.execute(select(users.c.id).where(users.c.email == email.strip().lower()))).scalar_one_or_none()
             if user_id is None:
                 return False
-            await s.execute(delete(plan_grants).where(plan_grants.c.user_id == user_id))
+            deleted = (await s.execute(delete(plan_grants).where(plan_grants.c.user_id == user_id))).rowcount
         self._cache.pop(user_id, None)
-        return True
+        return bool(deleted)
 
     async def listing(self) -> list[dict[str, Any]]:
         async with self._db.session() as s:

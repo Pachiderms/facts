@@ -456,8 +456,10 @@ def test_edu_room_websocket_uses_room_budget_and_lets_many_students_in_from_one_
                 ev = sockets[0].receive_json()
                 if ev["type"] == "message":
                     seen.append(ev["message"]["check"])
-            assert seen[0]["status"] == "pending"
-            assert seen[1]["status"] == "unchecked" and seen[1]["badge_text"] == ROOM_BUDGET_REASON
+            # Deux messages partent presque ensemble sur deux sockets : l'ordre d'arrivée n'est pas garanti.
+            # Budget du salon = 1 vérification : l'un est vérifié, l'autre refusé avec la raison du budget.
+            assert sorted(c_["status"] for c_ in seen) == ["pending", "unchecked"]
+            assert [c_["badge_text"] for c_ in seen if c_["status"] == "unchecked"] == [ROOM_BUDGET_REASON]
             personal = c.app.state.quota_policy
             student = personal.anonymous("testclient", "eleve-00-" + "x" * 20)
             assert (await_run(personal.usage(student)))["debate"]["used"] == 0  # le quota personnel de l'élève est intact

@@ -72,7 +72,8 @@ def query(sql, **params):
         db = Database(URL)
         try:
             async with db.session() as s:
-                return (await s.execute(text(sql), params)).all()
+                result = await s.execute(text(sql), params)
+                return result.all() if result.returns_rows else []
         finally:
             await db.aclose()
 
