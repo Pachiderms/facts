@@ -36,6 +36,21 @@ def seconds_until_next_day(now: datetime) -> int:
     return max(1, int((nxt - now).total_seconds()) + 1)
 
 
+MONTHLY_PREFIX = "m_"  # les compteurs de ce type se remettent à zéro le 1er du mois (UTC), pas chaque jour
+
+
+def window_start(kind: str, now: datetime) -> date:
+    """Début de la fenêtre de comptage : le jour, ou le 1er du mois pour les compteurs « m_… »."""
+    today = now.date()
+    return today.replace(day=1) if kind.startswith(MONTHLY_PREFIX) else today
+
+
+def seconds_until_next_month(now: datetime) -> int:
+    first = now.date().replace(day=1)
+    nxt = (first + timedelta(days=32)).replace(day=1)
+    return max(1, int((datetime.combine(nxt, datetime.min.time(), tzinfo=timezone.utc) - now).total_seconds()) + 1)
+
+
 class QuotaStore(Protocol):
     async def consume(self, kind: str, key: str, limit: int) -> bool: ...
     async def used(self, kind: str, key: str) -> int: ...
@@ -49,16 +64,18 @@ class MemoryQuotas:
 
     def _count(self, kind: str, key: str) -> int:
         item = self._counts.get((kind, key))
-        return item[1] if item is not None and item[0] == self._clock().date() else 0
+        return item[1] if item is not None and item[0] == window_start(kind, self._clock()) else 0
 
     async def consume(self, kind: str, key: str, limit: int) -> bool:
-        today = self._clock().date()
+        now = self._clock()
         if self._count(kind, key) >= limit:
             return False
         if (kind, key) not in self._counts and len(self._counts) >= self._max:
-            for k in [k for k, (d, _) in self._counts.items() if d != today] or [next(iter(self._counts))]:
+            stale = [k for k, (d, _) in self._counts.items() if d != window_start(k[0], now)]
+            daily = [k for k in self._counts if not k[0].startswith(MONTHLY_PREFIX)]  # un compteur mensuel (budget payé) s'évince en dernier
+            for k in stale or [(daily or list(self._counts))[0]]:
                 del self._counts[k]
-        self._counts[(kind, key)] = (today, self._count(kind, key) + 1)
+        self._counts[(kind, key)] = (window_start(kind, now), self._count(kind, key) + 1)
         return True
 
     async def used(self, kind: str, key: str) -> int:
@@ -79,7 +96,7 @@ class PostgresQuotas:
     async def consume(self, kind: str, key: str, limit: int) -> bool:
         stmt = (
             pg_insert(usage_counters)
-            .values(kind=kind, key=key, day=self._clock().date(), count=1)
+            .values(kind=kind, key=key, day=window_start(kind, self._clock()), count=1)
             .on_conflict_do_update(
                 index_elements=[usage_counters.c.kind, usage_counters.c.key, usage_counters.c.day],
                 set_={"count": usage_counters.c.count + 1},
@@ -92,7 +109,18 @@ class PostgresQuotas:
                 granted = (await s.execute(stmt)).first() is not None
                 self._writes += 1
                 if self._writes % PURGE_EVERY == 0:
-                    await s.execute(delete(usage_counters).where(usage_counters.c.day < self._clock().date() - timedelta(days=1)))
+                    now = self._clock()
+                    await s.execute(  # quotidiens : on garde hier ; mensuels : on garde le mois en cours (et le précédent)
+                        delete(usage_counters).where(
+                            ~usage_counters.c.kind.like(MONTHLY_PREFIX + "%"), usage_counters.c.day < now.date() - timedelta(days=1)
+                        )
+                    )
+                    await s.execute(
+                        delete(usage_counters).where(
+                            usage_counters.c.kind.like(MONTHLY_PREFIX + "%"),
+                            usage_counters.c.day < (now.date().replace(day=1) - timedelta(days=1)).replace(day=1),
+                        )
+                    )
             return granted
         except Exception:  # noqa: BLE001 - détail (hôte, mot de passe) jamais journalisé
             logger.warning("quotas : base injoignable, repli sur la mémoire")
@@ -104,7 +132,7 @@ class PostgresQuotas:
                 row = (
                     await s.execute(
                         select(usage_counters.c.count).where(
-                            usage_counters.c.kind == kind, usage_counters.c.key == key, usage_counters.c.day == self._clock().date()
+                            usage_counters.c.kind == kind, usage_counters.c.key == key, usage_counters.c.day == window_start(kind, self._clock())
                         )
                     )
                 ).first()

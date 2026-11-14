@@ -161,6 +161,22 @@ La bêta sert à savoir **combien coûte vraiment** une vérification avant de f
 
 Les compteurs sont écrits toutes les 60 secondes et à l'arrêt du serveur ; un redémarrage brutal peut perdre au plus une minute de mesures. Après trois essais de jeton faux depuis une même IP, l'endpoint répond 429.
 
+## Licences Edu (établissements) : activation à la main
+
+Une licence Edu se vend sur devis ; il n'y a pas de paiement en ligne. Vous l'activez vous-même, avec le même `FACTS_ADMIN_TOKEN` que pour les coûts (table `plan_grants`, migration 0007, créée au démarrage).
+
+1. **L'enseignant ou le responsable se connecte une fois** avec Google (le compte doit exister).
+2. Activer la licence (remplacer `<jeton>` ; `days` = durée, vide = sans fin ; `check_pool` = vérifications par mois pour toute la licence, vide = `FACTS_EDU_MONTHLY_CHECK_POOL`) :
+   `curl -X POST -H "Authorization: Bearer <jeton>" -H "Content-Type: application/json" -d '{"email":"prof@lycee.fr","days":365,"check_pool":5000,"note":"Lycée X"}' https://api.<votre-domaine>/api/v1/admin/plans/grant`
+3. Lister : `GET /api/v1/admin/plans` · Retirer : `POST /api/v1/admin/plans/revoke` avec `{"email":"prof@lycee.fr"}`. L'effet est immédiat. Une licence échue cesse seule de donner l'accès. Mettre dans `note` le nom de l'établissement, jamais de donnée sensible.
+
+**Ce que change le plan Edu**
+- Les salons créés par ce compte accueillent jusqu'à `FACTS_ROOM_CAPACITY_EDU` personnes **connectées en même temps** (300 par défaut ; 8 en anonyme et en gratuit, 20 en Pro : `FACTS_ROOM_CAPACITY_*`). C'est le plan du créateur au moment de la création qui compte.
+- Les vérifications des messages de ces salons consomment **le budget du salon** (`FACTS_EDU_ROOM_CHECK_BUDGET`, par salon) et **le pool mensuel de la licence** (partagé entre tous ses salons, remis à zéro le 1er du mois, UTC) — jamais le quota personnel des élèves. Budget épuisé : les messages restent publiés, marqués « BUDGET DU SALON ATTEINT » ou « BUDGET DE LA LICENCE ATTEINT ».
+- Une classe partage souvent une seule adresse IP : un salon Edu accepte `FACTS_WS_MAX_CONNECTIONS_PER_IP_EDU` connexions par IP (300 par défaut, contre 5 ailleurs).
+- Limite connue : le nombre de **places d'intervenant** reste de 6 au plus (lettres A à F) ; les autres personnes sont spectatrices. Un salon où toute la classe prend la parole demandera une refonte des places (étape ultérieure).
+- Le budget d'un salon vit en mémoire avec lui (un salon éphémère) ; le pool est durable.
+
 ## Paiement Pro (Lemon Squeezy) : à n'ouvrir qu'avec une micro-entreprise
 
 Le code est livré **éteint** (`FACTS_PAYMENTS_ENABLED=false`) : la page Tarifs affiche « Bientôt disponible », le lien de paiement et le webhook refusent tout. Rien n'est encaissé tant que vous ne l'allumez pas.

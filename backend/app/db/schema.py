@@ -131,3 +131,18 @@ cost_usage = Table(
     Column("credits", BigInteger, nullable=False, server_default="0"),
     PrimaryKeyConstraint("day", "profile", "operation", "kind", "name", name="pk_cost_usage"),
 )
+
+
+# Plans accordés à la main (licence Edu vendue sur devis) : indépendants de l'abonnement en ligne (`subscriptions`).
+plan_grants = Table(
+    "plan_grants",
+    metadata,
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("plan", String(16), nullable=False),
+    Column("check_pool", Integer, nullable=True),  # vérifications par mois ; vide = valeur par défaut des réglages
+    Column("expires_at", DateTime(timezone=True), nullable=True),  # vide = sans fin
+    Column("note", String(200), nullable=True),  # ex. nom de l'établissement ; ne jamais y mettre de donnée sensible
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("plan IN ('edu')", name="plan_known"),
+    CheckConstraint("check_pool IS NULL OR check_pool > 0", name="pool_positive"),
+)

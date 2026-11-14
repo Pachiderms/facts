@@ -136,6 +136,8 @@ class Room:
         moderator: Moderator | None = None,
         kick_threshold: int = KICK_THRESHOLD_DEFAULT,
         kick_vote_seconds: float = KICK_VOTE_SECONDS,
+        max_spectators: int = MAX_SPECTATORS,
+        budget: Any | None = None,
     ) -> None:
         if not KICK_THRESHOLD_MIN <= kick_threshold <= KICK_THRESHOLD_MAX:
             raise ValueError("kick_threshold hors limites")
@@ -158,7 +160,8 @@ class Room:
         self._clock = clock
         self.last_activity = clock()
         self._checker, self._limits = checker, limits
-        self._max_chars, self._max_clients = max_message_chars, max_clients
+        self._max_chars, self._max_clients, self._max_spectators = max_message_chars, max_clients, max_spectators
+        self.budget = budget  # salon Edu : budget de vérifications (RoomBudget) ; None = quotas personnels
         self._checkable = checkable
         self.clients: dict[str, Client] = {}
         self.messages: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY)
@@ -303,7 +306,7 @@ class Room:
                 role = free_seat
             elif not self.spectators_allowed:
                 raise SpectatorsNotAllowedError("Les spectateurs ne sont pas admis dans ce salon.")
-            elif sum(1 for c in self.clients.values() if c.role == "spectator") >= MAX_SPECTATORS:
+            elif sum(1 for c in self.clients.values() if c.role == "spectator") >= self._max_spectators:
                 raise RoomFullError("Salon complet.")
             else:
                 role = "spectator"
@@ -485,7 +488,7 @@ class Room:
         client: Client,
         text: str,
         reply_to: int | None = None,
-        allow_check: Callable[[], Awaitable[bool]] | None = None,
+        allow_check: Callable[[], Awaitable[bool | str]] | None = None,
     ) -> dict[str, Any] | None:
         """Publie le message. Renvoie None s'il est refusé par la modération (l'auteur est prévenu)."""
         if client.role == "spectator":
@@ -510,9 +513,12 @@ class Room:
                 return None
 
         needs_check = self._checkable(clean)
-        over_quota = False
-        if needs_check and allow_check is not None and not await allow_check():
-            needs_check, over_quota = False, True  # quota de vérifications du jour atteint : le message est publié sans vérification
+        over_quota: str | None = None
+        if needs_check and allow_check is not None:
+            allowed = await allow_check()
+            if isinstance(allowed, str) or not allowed:  # refus : False, ou motif (texte)
+                needs_check = False  # quota atteint : le message est publié sans vérification
+                over_quota = allowed if isinstance(allowed, str) and allowed else "QUOTA DU JOUR ATTEINT"
         self._next_id += 1
         self.total_messages += 1
         message = {
@@ -522,7 +528,7 @@ class Room:
             "text": clean,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "check": (
-                MessageCheck.pending() if needs_check else MessageCheck.unchecked("QUOTA DU JOUR ATTEINT") if over_quota else MessageCheck.no_claim()
+                MessageCheck.pending() if needs_check else MessageCheck.unchecked(over_quota) if over_quota else MessageCheck.no_claim()
             ).model_dump(),
             # Citation : numéro de l'auteur et aperçu repris du message d'origine par le SERVEUR (jamais fourni par le client).
             "reply_to": None if quoted is None else {"id": quoted["id"], "speaker": quoted["speaker"], "preview": reply_preview(quoted["text"])},
@@ -774,6 +780,8 @@ class RoomRegistry:
         spectators_allowed: bool = True,
         kick_threshold: int = KICK_THRESHOLD_DEFAULT,
         owner_aliases: tuple[str, ...] = (),
+        capacity: int | None = None,
+        budget: Any | None = None,
     ) -> Room:
         if self._factory is None:
             raise RuntimeError("Création de salons non configurée.")
@@ -787,6 +795,8 @@ class RoomRegistry:
             visibility=visibility, access_code=code, owner_id=owner_id,
             max_participants=max_participants, spectators_allowed=spectators_allowed,
             kick_threshold=kick_threshold,
+            **({"max_clients": capacity, "max_spectators": capacity} if capacity is not None else {}),
+            **({"budget": budget} if budget is not None else {}),
         )
         room.canonical(owner_id, owner_aliases)  # le créateur reste propriétaire s'il se (dé)connecte ensuite
         self._rooms[room_id] = room
@@ -815,9 +825,10 @@ class RoomRegistry:
 
         def factory(**kw: Any) -> Room:
             extra = {"checkable": checkable} if checkable is not None else {}
+            kw.setdefault("max_clients", settings.ws_max_room_connections)
             return Room(
                 checker=checker, limits=limits, **extra,
-                max_message_chars=settings.ws_max_message_chars, max_clients=settings.ws_max_room_connections, moderator=moderator, **kw,
+                max_message_chars=settings.ws_max_message_chars, moderator=moderator, **kw,
             )
 
         rooms = [

@@ -131,7 +131,8 @@ class Settings(BaseSettings):
     ws_max_message_chars: int = 500  # aligné sur assertion_max_chars : un message est vérifié comme une assertion
     ws_messages_per_minute: int = 12
     ws_max_connections_per_ip: int = 5
-    ws_max_room_connections: int = 100
+    ws_max_room_connections: int = 300  # plafond technique absolu, par salon (les plafonds par plan sont dessous)
+    ws_max_connections_per_ip_edu: int = 300  # salon Edu : une classe entière partage l'IP de l'établissement
     ws_max_concurrent_checks: int = 2  # protège les quotas gratuits (recherche + LLM)
     ws_max_pending_checks: int = 20
     ws_check_timeout_seconds: float = 60.0
@@ -141,6 +142,14 @@ class Settings(BaseSettings):
     max_rooms: int = 50
     room_idle_ttl_seconds: int = 1_800  # un salon non permanent, vide et inactif est supprimé
     daily_room_creation_limit: int = 3  # par visiteur et par jour
+    # Personnes connectées en même temps dans un salon (intervenants + spectateurs), selon le plan de son CRÉATEUR.
+    room_capacity_anonymous: int = 8
+    room_capacity_free: int = 8
+    room_capacity_pro: int = 20
+    room_capacity_edu: int = 300
+    # Plan Edu : budget de vérifications d'un salon (plafond par séance) et pool mensuel de la licence (partagé entre ses salons).
+    edu_room_check_budget: int = 300
+    edu_monthly_check_pool: int = 5_000
     moderation_ban_seconds: int = 3600  # exclusion au 3e message illégal
     moderation_strike_ttl_seconds: int = 86_400  # les avertissements s'oublient après 24 h sans récidive
     moderation_timeout_seconds: float = 10.0

@@ -48,6 +48,11 @@ describe('fetchUsage', () => {
     expect((await fetchUsage()).plan).toBe('pro')
   })
 
+  it('accepte le plan Edu', async () => {
+    fetchMock.mockResolvedValueOnce(json(usage({ plan: 'edu' })))
+    expect((await fetchUsage()).plan).toBe('edu')
+  })
+
   it('rejette une réponse hors contrat', async () => {
     for (const bad of [{}, usage({ plan: 'vip' }), usage({ degraded: 'non' }), usage({ checks: { used: 'x', limit: 1, remaining: 1 } }), usage({ debate: undefined }), usage({ debate: { used: 1 } })]) {
       fetchMock.mockResolvedValueOnce(json(bad))

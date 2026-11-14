@@ -431,7 +431,7 @@ export async function pushHistory(token: string, entries: RemoteHistoryEntry[], 
 }
 
 export interface Usage {
-  plan: 'anonymous' | 'free' | 'pro'
+  plan: 'anonymous' | 'free' | 'pro' | 'edu'
   checks: { used: number; limit: number; remaining: number }
   /** Messages de débat vérifiés (budget distinct de celui du chatbot). */
   debate: { used: number; limit: number; remaining: number }
@@ -451,7 +451,7 @@ export async function fetchUsage(signal?: AbortSignal): Promise<Usage> {
     !c ||
     !b ||
     !isCount(b) ||
-    (d.plan !== 'anonymous' && d.plan !== 'free' && d.plan !== 'pro') ||
+    (d.plan !== 'anonymous' && d.plan !== 'free' && d.plan !== 'pro' && d.plan !== 'edu') ||
     typeof d.degraded !== 'boolean' ||
     typeof c.used !== 'number' ||
     typeof c.limit !== 'number' ||

@@ -47,7 +47,10 @@ async def optional_user(request: Request):
 
 
 async def account_plan(app, user_id) -> str:
-    """« pro » pour un abonné actif, « free » sinon (et si le paiement n'est pas activé ou la base indisponible)."""
+    """« edu » (licence accordée), « pro » (abonné actif) ou « free » (par défaut, y compris si la base est indisponible)."""
+    plans = getattr(app.state, "plans", None)
+    if plans is not None:
+        return await plans.plan_of(user_id)
     billing = getattr(app.state, "billing", None)
     return await billing.plan_of(user_id) if billing is not None else "free"
 
