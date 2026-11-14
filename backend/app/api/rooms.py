@@ -304,6 +304,13 @@ async def create_room(request: Request, body: CreateRoomRequest):
             headers={"Retry-After": str(limiter.retry_after(ip))},
         )
     who = await resolve_identity(app, body.participant_token, bearer_token(request))
+    # La capacité (personnes connectées en même temps) dépend du plan du CRÉATEUR ; un salon Edu a en plus son budget de vérifications.
+    policy = app.state.quota_policy
+    plan = await account_plan(app, who.user_id) if who.user_id is not None else "anonymous"
+    budget = None
+    if plan == "edu":
+        grant = await app.state.plans.grant_of(who.user_id)
+        budget = policy.room_budget(who.id, grant.check_pool if grant is not None else None)
     try:
         room = await app.state.rooms.create(
             title=title,
@@ -314,6 +321,8 @@ async def create_room(request: Request, body: CreateRoomRequest):
             max_participants=body.max_participants,
             spectators_allowed=body.spectators_allowed,
             kick_threshold=body.kick_threshold,
+            capacity=policy.room_capacity(plan),
+            budget=budget,
         )
     except TooManyRoomsError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
@@ -363,7 +372,9 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
         return
 
     connections = app.state.ws_connections
-    if connections[ip] >= settings.ws_max_connections_per_ip:
+    # Une classe entière partage l'adresse de l'établissement : plafond plus large pour un salon Edu.
+    ip_cap = settings.ws_max_connections_per_ip_edu if room.budget is not None else settings.ws_max_connections_per_ip
+    if connections[ip] >= ip_cap:
         await ws.close(code=WS_TRY_AGAIN_LATER)
         return
 
@@ -417,7 +428,11 @@ async def room_ws(ws: WebSocket, room_id: str) -> None:
             who_q = quota.account(who.id, ip, await account_plan(app, who.user_id), who.aliases[0] if who.aliases else None)
         else:
             who_q = quota.anonymous(ip, who.id)
-        await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_debate(who_q))
+        if room.budget is not None:  # salon Edu : budget du salon et de la licence, pas les quotas personnels
+            budget = room.budget
+            await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_room_check(budget))
+        else:
+            await _receive_loop(ws, room, client, ip, settings, lambda: quota.consume_debate(who_q))
     except RuntimeError:
         pass  # socket déjà fermée côté client pendant un envoi
     finally:

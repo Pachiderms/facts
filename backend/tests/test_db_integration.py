@@ -64,7 +64,7 @@ async def tables(db: Database) -> set[str]:
 async def test_upgrade_creates_the_schema_and_downgrade_removes_it(db):
     assert await tables(db) == set()
     await migrate("upgrade", "head")
-    assert await tables(db) == {"app_meta", "users", "sessions", "user_participants", "user_rooms", "usage_counters", "subscriptions", "billing_events", "cost_usage", "alembic_version"}
+    assert await tables(db) == {"app_meta", "users", "sessions", "user_participants", "user_rooms", "usage_counters", "subscriptions", "billing_events", "cost_usage", "plan_grants", "alembic_version"}
     async with db.engine.connect() as conn:
         pk = await conn.run_sync(lambda c: inspect(c).get_pk_constraint("app_meta"))
     assert pk["constrained_columns"] == ["key"]

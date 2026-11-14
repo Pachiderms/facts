@@ -31,6 +31,7 @@ from app.core import metering
 from app.services.costs import CostRecorder
 from app.services.accounts import AccountService
 from app.services.billing import BillingService
+from app.services.plans import PlanService
 from app.services.history import HistoryService
 from app.services.quota_policy import QuotaPolicy
 from app.core.quotas import MemoryQuotas, PostgresQuotas, random_salt
@@ -141,6 +142,8 @@ def create_app(
             )
         if app.state.billing is None and app.state.db is not None:
             app.state.billing = BillingService(app.state.db, grace_days=settings.billing_grace_days)
+        if app.state.plans is None and app.state.db is not None:
+            app.state.plans = PlanService(app.state.db, app.state.billing)
         if app.state.accounts is not None and app.state.db is not None and app.state.history is None:
             app.state.history = HistoryService(app.state.db)
         if app.state.db is not None and isinstance(app.state.quota_policy.store, MemoryQuotas):
@@ -215,6 +218,7 @@ def create_app(
         app.state.accounts = AccountService(db, session_ttl_days=settings.session_ttl_days, max_sessions=settings.max_sessions_per_user)
     app.state.history = HistoryService(db) if app.state.accounts is not None and db is not None else None
     app.state.billing = BillingService(db, grace_days=settings.billing_grace_days) if db is not None else None  # lecture du plan : toujours ; vente et webhook : payments_enabled
+    app.state.plans = PlanService(db, app.state.billing) if db is not None else None  # licences accordées (Edu), prioritaires sur l'abonnement
     app.state.login_limiter = SlidingWindowRateLimiter(settings.login_attempts_per_window, settings.login_window_seconds)
     app.state.stt_minute_limiter = SlidingWindowRateLimiter(settings.stt_per_minute, 60)
     app.state.stt_person_limiter = SlidingWindowRateLimiter(settings.stt_daily_per_person, 86_400)
